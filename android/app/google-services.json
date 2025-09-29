@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "224492382935",
+    "project_id": "paw-2me",
+    "storage_bucket": "paw-2me.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:224492382935:android:f222a0154b1eb1c5e55e92",
+        "android_client_info": {
+          "package_name": "com.paw2me"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA4iYkM5bFKmh7ytQIu5jd5vmNm8KwmY24"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
