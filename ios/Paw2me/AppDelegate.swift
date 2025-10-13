@@ -2,6 +2,8 @@ import UIKit
 import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
+import FirebaseCore 
+
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -22,6 +24,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     reactNativeFactory = factory
 
     window = UIWindow(frame: UIScreen.main.bounds)
+
+    // ⚙️ Configuración explícita de Firebase (sin depender del plist copiado)
+    if FirebaseApp.app() == nil {
+      let options = FirebaseOptions(googleAppID: "1:224492382935:ios:952927362088eab8e55e92",
+                                    gcmSenderID: "224492382935")
+      options.apiKey       = "AIzaSyAQirQ5-Ie0ErDox_EMfj8EkO0Wy4aoOwQ"
+      options.projectID    = "paw-2me"
+      options.bundleID     = "org.reactjs.native.example.Paw2me"
+      // 🔧 Bucket correcto suele ser appspot.com, no firebasestorage.app
+      options.storageBucket = "paw-2me.appspot.com"
+      FirebaseApp.configure(options: options)
+    }
 
     factory.startReactNative(
       withModuleName: "Paw2me",
