@@ -1,4 +1,6 @@
 import React from 'react';
+import { useEffect } from 'react';
+import { firebaseSanityCheck } from '@services/firebaseSanity';
 import {
   SafeAreaProvider,
   initialWindowMetrics,
@@ -24,6 +26,12 @@ const App = () => {
   const isDark = useThemeStore(s => s.dark);
   const paper = isDark ? darkTheme : lightTheme;
   const nav = isDark ? PaperNavDark : PaperNavLight;
+
+  useEffect(() => {
+    firebaseSanityCheck()
+      .then(info => console.log('🔥 Firebase OK:', info))
+      .catch(e => console.log('🔥 Firebase ERROR:', e));
+  }, []);
 
   return (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>

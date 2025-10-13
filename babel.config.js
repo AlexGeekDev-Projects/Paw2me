@@ -16,6 +16,5 @@ module.exports = {
         '@models': './src/models',
       },
     }],
-    'react-native-reanimated/plugin', // ← obligatorio y al final
   ],
 };
