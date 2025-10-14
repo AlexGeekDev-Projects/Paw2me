@@ -1,4 +1,14 @@
 apply plugin: "com.android.application"
+
+// Asegura qué .env usar por variante (opcional pero recomendable)
+project.ext.envConfigFiles = [
+  debug: ".env",
+  release: ".env"
+]
+
+// Carga dotenv.gradle (DEBE ir después de lo anterior)
+apply from: project(':react-native-config').projectDir.getPath() + "/dotenv.gradle"
+
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"

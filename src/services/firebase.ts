@@ -1,35 +1,44 @@
+// src/services/firebase.ts
 import { getApp } from '@react-native-firebase/app';
+import {
+  getFirestore,
+  serverTimestamp,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  query,
+  where,
+  orderBy,
+  limit,
+  type FirebaseFirestoreTypes,
+} from '@react-native-firebase/firestore';
+import { getAuth } from '@react-native-firebase/auth';
+import { getStorage } from '@react-native-firebase/storage';
 
-export type FirebaseInfo = {
-  appName: string;
-  appId?: string;
-  projectId?: string;
+// Re-export modular APIs que ya usas
+export {
+  getApp,
+  getAuth,
+  getFirestore,
+  serverTimestamp,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  query,
+  where,
+  orderBy,
+  limit,
+  getStorage,
+  type FirebaseFirestoreTypes,
 };
 
-const pickString = (
-  o: Record<string, unknown>,
-  key: string,
-): string | undefined => {
-  const v = o[key];
-  return typeof v === 'string' ? v : undefined;
-};
+// Timestamp helper “ahora”
+export const nowTs = () => serverTimestamp();
 
-export const getFirebaseInfoSafe = (): FirebaseInfo | null => {
-  try {
-    const app = getApp(); // lanza si no existe la app por defecto
-    const raw = (app.options ?? {}) as Record<string, unknown>;
-
-    const info: FirebaseInfo = { appName: app.name };
-
-    // Solo asignamos si existe (evita undefined con exactOptionalPropertyTypes)
-    const appId = pickString(raw, 'appId') ?? pickString(raw, 'applicationId');
-    if (appId) info.appId = appId;
-
-    const projectId = pickString(raw, 'projectId');
-    if (projectId) info.projectId = projectId;
-
-    return info;
-  } catch {
-    return null; // Firebase no inicializado aún
-  }
-};
+// Generador de IDs para una colección
+export const newId = (collectionPath: string) =>
+  doc(collection(getFirestore(), collectionPath)).id;
