@@ -1,83 +1,109 @@
-import React, { useMemo, useCallback } from 'react';
-import { FlatList } from 'react-native';
-import type { ListRenderItemInfo } from 'react-native'; // <- type-only
-import { Text } from 'react-native-paper';
-import Screen from '@components/layout/Screen';
+// src/screens/Feed/FeedScreen.tsx
+import React, { useCallback, useEffect, useState } from 'react';
+import { FlatList, RefreshControl } from 'react-native';
+import { Appbar, FAB } from 'react-native-paper';
+import Loading from '@components/feedback/Loading';
 import PostCard from '@components/feed/PostCard';
-import type { Animal } from '@models/animal';
-import type { Post } from '@models/post';
-import { useNavigation } from '@react-navigation/native';
-import type { RootStackParamList } from '@navigation/types';
+import {
+  listPostsPublic,
+  getUserReacted,
+  countReactions,
+  toggleReaction,
+  toPostVM,
+} from '@services/postsService';
+import type { PostDoc, PostCardVM } from '@models/post';
+import { getAuth } from '@services/firebase';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useNavigation } from '@react-navigation/native';
+import type { RootStackParamList } from '@navigation/RootNavigator';
 
-type FeedItem = { animal: Animal; post: Post };
-
-const mock: FeedItem[] = [
-  {
-    animal: {
-      id: 'a1',
-      name: 'Rocky',
-      species: 'dog',
-      size: 'M',
-      sex: 'male',
-      status: 'ready',
-      breed: 'mestizo',
-      ageLabel: 'young',
-      sterilized: true,
-      vaccinated: true,
-      location: { country: 'MX', state: 'CDMX', city: 'Benito Juárez' },
-      media: {
-        images: [
-          'https://images.dog.ceo/breeds/terrier-pitbull/20200820_131744.jpg',
-        ],
-      },
-      createdAt: Date.now() - 86400000,
-      updatedAt: Date.now() - 3600000,
-      ownerRef: { type: 'user', id: 'u1' }, // <- faltaba
-    },
-    post: {
-      id: 'p1',
-      animalId: 'a1',
-      authorId: 'u1',
-      caption: 'Juguetón y noble. Busca hogar responsable.',
-      media: { images: [] },
-      reactionsCount: 12,
-      commentsCount: 3,
-      createdAt: Date.now() - 7200000,
-      updatedAt: Date.now() - 3600000,
-      visibility: 'public',
-    },
-  },
-];
-
-const FeedScreen = () => {
+const FeedScreen: React.FC = () => {
+  const [items, setItems] = useState<PostCardVM[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
-  const data = useMemo(() => mock, []);
-  const keyExtractor = useCallback((item: FeedItem) => item.post.id, []);
-  const renderItem = useCallback(
-    ({ item }: ListRenderItemInfo<FeedItem>) => (
-      <PostCard
-        animal={item.animal}
-        post={item.post}
-        onOpen={animalId => navigation.navigate('AnimalProfile', { animalId })}
-        onShare={() => {}}
-      />
-    ),
-    [navigation],
+  const uid = getAuth().currentUser?.uid ?? 'dev';
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const posts: PostDoc[] = await listPostsPublic({ limit: 30 });
+    const vms: PostCardVM[] = [];
+    for (const p of posts) {
+      const [reacted, rc] = await Promise.all([
+        getUserReacted(p.id, uid),
+        countReactions(p.id),
+      ]);
+      vms.push(toPostVM({ ...p, reactionCount: rc }, reacted));
+    }
+    setItems(vms);
+    setLoading(false);
+  }, [uid]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
+
+  const onToggleReact = useCallback(
+    async (postId: string, next: boolean) => {
+      setItems(prev =>
+        prev.map(it =>
+          it.id === postId
+            ? {
+                ...it,
+                reactedByMe: next,
+                reactionCount: Math.max(0, it.reactionCount + (next ? 1 : -1)),
+              }
+            : it,
+        ),
+      );
+      const final = await toggleReaction(postId, uid);
+      const rc = await countReactions(postId);
+      setItems(prev =>
+        prev.map(it =>
+          it.id === postId
+            ? { ...it, reactedByMe: final, reactionCount: rc }
+            : it,
+        ),
+      );
+    },
+    [uid],
   );
 
   return (
-    <Screen>
-      <Text variant="headlineSmall">Inicio</Text>
-      <FlatList
-        data={data}
-        keyExtractor={keyExtractor}
-        renderItem={renderItem}
-        contentContainerStyle={{ paddingTop: 12 }}
+    <>
+      <Appbar.Header mode="center-aligned">
+        <Appbar.Content title="Feed" />
+      </Appbar.Header>
+
+      {loading ? (
+        <Loading variant="skeleton-card-list" count={4} />
+      ) : (
+        <FlatList
+          data={items}
+          keyExtractor={it => it.id}
+          renderItem={({ item }) => (
+            <PostCard data={item} onToggleReact={onToggleReact} />
+          )}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          contentInsetAdjustmentBehavior="automatic"
+        />
+      )}
+      <FAB
+        icon="plus"
+        style={{ position: 'absolute', right: 16, bottom: 24 }}
+        onPress={() => navigation.navigate('CreatePost')}
       />
-    </Screen>
+    </>
   );
 };
 

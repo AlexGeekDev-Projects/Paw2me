@@ -12,7 +12,12 @@
           "package_name": "com.paw2me"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "224492382935-ompoijqtk1r6c7a1han9lq7alj95cu1u.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyA4iYkM5bFKmh7ytQIu5jd5vmNm8KwmY24"
@@ -20,7 +25,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "224492382935-ompoijqtk1r6c7a1han9lq7alj95cu1u.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "224492382935-31i0a4mi0ktevb3rom31s0ii6q7tfb3h.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "org.reactjs.native.example.Paw2me"
+              }
+            }
+          ]
         }
       }
     }

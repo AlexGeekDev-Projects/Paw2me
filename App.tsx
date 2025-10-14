@@ -1,37 +1,25 @@
-// App.tsx en la raíz (igual patrón que Radar4, pero apuntando a TU navigator)
+// App.tsx
 import React from 'react';
-import {
-  NavigationContainer,
-  DefaultTheme as NavigationLight,
-  DarkTheme as NavigationDark,
-} from '@react-navigation/native';
-import { PaperProvider } from 'react-native-paper';
-import { enableScreens } from 'react-native-screens';
-import { getApp } from '@react-native-firebase/app';
+import RootNavigator from '@navigation/RootNavigator';
+import Config from 'react-native-config';
+import { initGeocoder } from '@services/geoService';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
-import AppNavigator from '@navigation/AppNavigator'; // <-- usa tu navigator real
-import { lightTheme, darkTheme } from '@theme/theme';
-import { useThemeStore } from '@store/useThemeStore';
-
-enableScreens();
-
-export default function App() {
-  const isDark = useThemeStore(state => state.dark);
-  let projectId: string | undefined;
-  try {
-    projectId = getApp().options.projectId;
-    console.log('[Firebase] iOS projectId =', projectId);
-  } catch {
-    console.log(
-      '[Firebase] iOS: default app no inicializada (revisar GoogleService-Info.plist / Bundle ID)',
-    );
-  }
-
-  return (
-    <PaperProvider theme={isDark ? darkTheme : lightTheme}>
-      <NavigationContainer theme={isDark ? NavigationDark : NavigationLight}>
-        <AppNavigator />
-      </NavigationContainer>
-    </PaperProvider>
+const GEOCODING_KEY = (Config as Record<string, string | undefined>)[
+  'GOOGLE_MAPS_GEOCODING_KEY'
+];
+if (GEOCODING_KEY && GEOCODING_KEY.length > 0) {
+  initGeocoder(GEOCODING_KEY);
+} else {
+  console.warn(
+    '[geo] GOOGLE_MAPS_GEOCODING_KEY no está definida. No habrá reverse geocoding.',
   );
 }
+
+const App = () => (
+  <GestureHandlerRootView style={{ flex: 1 }}>
+    <RootNavigator />
+  </GestureHandlerRootView>
+);
+
+export default App;

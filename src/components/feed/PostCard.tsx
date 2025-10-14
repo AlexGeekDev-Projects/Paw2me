@@ -1,64 +1,55 @@
-import React from 'react';
-import { Image, StyleSheet, View } from 'react-native';
-import { Card, Text, Button, useTheme, Chip } from 'react-native-paper';
-import type { Animal } from '@models/animal';
-import type { Post } from '@models/post';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import React, { useMemo } from 'react';
+import { View, StyleSheet, Image } from 'react-native';
+import { Card, Text, IconButton } from 'react-native-paper';
+import type { PostCardVM } from '@models/post';
 
-type Props = {
-  animal: Animal;
-  post: Post;
-  onOpen: (animalId: string) => void;
-  onShare?: (animal: Animal) => void;
-};
+interface Props {
+  data: PostCardVM;
+  onToggleReact: (postId: string, nextState: boolean) => void;
+  onShare?: (postId: string) => void;
+}
 
-const PostCard: React.FC<Props> = ({ animal, post, onOpen, onShare }) => {
-  const theme = useTheme();
-  const img = animal.media.images[0];
+const PostCard: React.FC<Props> = ({ data, onToggleReact, onShare }) => {
+  const likeIcon = data.reactedByMe ? 'heart' : 'heart-outline';
+  const imageGrid = useMemo(
+    () => (data.imageUrls ?? []).slice(0, 4),
+    [data.imageUrls],
+  );
 
   return (
-    <Card style={styles.card} mode="elevated">
-      <Card.Title
-        title={`${animal.name} · ${animal.breed ?? 'mestizo'}`}
-        subtitle={`${animal.location.city ?? ''}${animal.location.city ? ' · ' : ''}${animal.location.state ?? ''}`}
-        left={props => (
-          <Icon {...props} name="paw" color={theme.colors.primary} />
-        )}
-      />
-      {img ? (
-        <Image source={{ uri: img }} style={styles.image} resizeMode="cover" />
-      ) : null}
-      <Card.Content>
-        <View style={styles.row}>
-          <Chip compact>{animal.size}</Chip>
-          <View style={styles.spacer} />
-          <Chip compact>{animal.ageLabel ?? 'adulto'}</Chip>
-          <View style={styles.spacer} />
-          <Chip compact>
-            {animal.status === 'urgent' ? 'URGENTE' : 'En adopción'}
-          </Chip>
+    <Card style={styles.card} mode="contained">
+      {imageGrid.length > 0 ? (
+        <View style={styles.grid}>
+          {imageGrid.map(u => (
+            <Image key={u} source={{ uri: u }} style={styles.img} />
+          ))}
         </View>
-        {post.caption ? (
-          <Text style={styles.caption}>{post.caption}</Text>
-        ) : null}
+      ) : null}
+      <Card.Content style={{ gap: 10 }}>
+        <Text variant="bodyMedium">{data.content}</Text>
+        <View style={styles.row}>
+          <IconButton
+            icon={likeIcon}
+            onPress={() => onToggleReact(data.id, !data.reactedByMe)}
+            accessibilityLabel="Reaccionar"
+          />
+          <Text>{data.reactionCount}</Text>
+          <IconButton icon="share-variant" onPress={() => onShare?.(data.id)} />
+          <Text>{data.shareCount}</Text>
+        </View>
+        <Text variant="labelSmall">
+          {new Date(data.createdAt).toLocaleString()}
+        </Text>
       </Card.Content>
-      <Card.Actions>
-        <Button icon="eye-outline" onPress={() => onOpen(animal.id)}>
-          Ver perfil
-        </Button>
-        <Button icon="share-variant" onPress={() => onShare?.(animal)}>
-          Compartir
-        </Button>
-      </Card.Actions>
     </Card>
   );
 };
 
 const styles = StyleSheet.create({
-  card: { marginBottom: 16 },
-  image: { width: '100%', height: 220, backgroundColor: '#0002' },
-  row: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
-  spacer: { width: 8 },
-  caption: { marginTop: 8 },
+  card: { marginHorizontal: 12, marginVertical: 8, borderRadius: 16 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  img: { width: '48%', aspectRatio: 1, borderRadius: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 4 },
 });
+
 export default PostCard;
