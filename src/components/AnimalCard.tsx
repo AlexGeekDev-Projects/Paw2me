@@ -1,5 +1,6 @@
-import React from 'react';
-import { View, Image, StyleSheet, Pressable } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Image, StyleSheet, Pressable, Dimensions } from 'react-native';
+import type { ImageStyle } from 'react-native';
 import { Card, Text, Chip } from 'react-native-paper';
 import type { AnimalCardVM } from '@models/animal';
 
@@ -9,13 +10,38 @@ interface Props {
 }
 
 const AnimalCard: React.FC<Props> = ({ data, onPress }) => {
+  const [aspectRatio, setAspectRatio] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (data.coverUrl) {
+      Image.getSize(
+        data.coverUrl,
+        (width, height) => {
+          if (width > 0 && height > 0) {
+            setAspectRatio(width / height);
+          }
+        },
+        () => {
+          setAspectRatio(undefined);
+        },
+      );
+    }
+  }, [data.coverUrl]);
+
   return (
     <Pressable onPress={() => onPress?.(data.id)}>
       <Card style={styles.card} mode="contained">
         {data.coverUrl ? (
-          <Image source={{ uri: data.coverUrl }} style={styles.cover} />
+          <Image
+            source={{ uri: data.coverUrl }}
+            style={[
+              styles.coverBase,
+              aspectRatio ? { aspectRatio } : styles.coverFallback,
+            ]}
+            resizeMode="cover"
+          />
         ) : (
-          <View style={[styles.cover, styles.coverFallback]} />
+          <View style={[styles.coverBase, styles.coverFallback]} />
         )}
         <Card.Content>
           <Text variant="titleMedium">{data.name}</Text>
@@ -29,11 +55,11 @@ const AnimalCard: React.FC<Props> = ({ data, onPress }) => {
                 {c}
               </Chip>
             ))}
-            {data.urgent ? (
+            {data.urgent && (
               <Chip compact mode="outlined" style={styles.urgent}>
                 Urgente
               </Chip>
-            ) : null}
+            )}
           </View>
         </Card.Content>
       </Card>
@@ -42,17 +68,33 @@ const AnimalCard: React.FC<Props> = ({ data, onPress }) => {
 };
 
 const styles = StyleSheet.create({
-  card: { marginHorizontal: 12, marginVertical: 8, borderRadius: 16 },
-  cover: {
-    width: '100%',
-    height: 180,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+  card: {
+    marginHorizontal: 12,
+    marginVertical: 8,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
-  coverFallback: { backgroundColor: '#eee' },
-  row: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginTop: 8 },
-  chip: { marginRight: 6, marginBottom: 4 },
-  urgent: { borderColor: '#D33', marginLeft: 'auto' },
+  coverBase: {
+    width: '100%',
+    backgroundColor: '#eee',
+  },
+  coverFallback: {
+    height: 200,
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 6,
+    flexWrap: 'wrap',
+    marginTop: 8,
+  },
+  chip: {
+    marginRight: 6,
+    marginBottom: 4,
+  },
+  urgent: {
+    borderColor: '#D33',
+    marginLeft: 'auto',
+  },
 });
 
 export default AnimalCard;

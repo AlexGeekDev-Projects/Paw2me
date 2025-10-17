@@ -1198,42 +1198,42 @@ PODS:
   - DoubleConversion (1.1.6)
   - fast_float (8.0.0)
   - FBLazyVector (0.80.2)
-  - Firebase/Auth (12.3.0):
+  - Firebase/Auth (12.1.0):
     - Firebase/CoreOnly
-    - FirebaseAuth (~> 12.3.0)
-  - Firebase/CoreOnly (12.3.0):
-    - FirebaseCore (~> 12.3.0)
-  - Firebase/Firestore (12.3.0):
+    - FirebaseAuth (~> 12.1.0)
+  - Firebase/CoreOnly (12.1.0):
+    - FirebaseCore (~> 12.1.0)
+  - Firebase/Firestore (12.1.0):
     - Firebase/CoreOnly
-    - FirebaseFirestore (~> 12.3.0)
-  - Firebase/Storage (12.3.0):
+    - FirebaseFirestore (~> 12.1.0)
+  - Firebase/Storage (12.1.0):
     - Firebase/CoreOnly
-    - FirebaseStorage (~> 12.3.0)
-  - FirebaseAppCheckInterop (12.3.0)
-  - FirebaseAuth (12.3.0):
-    - FirebaseAppCheckInterop (~> 12.3.0)
-    - FirebaseAuthInterop (~> 12.3.0)
-    - FirebaseCore (~> 12.3.0)
-    - FirebaseCoreExtension (~> 12.3.0)
+    - FirebaseStorage (~> 12.1.0)
+  - FirebaseAppCheckInterop (12.1.0)
+  - FirebaseAuth (12.1.0):
+    - FirebaseAppCheckInterop (~> 12.1.0)
+    - FirebaseAuthInterop (~> 12.1.0)
+    - FirebaseCore (~> 12.1.0)
+    - FirebaseCoreExtension (~> 12.1.0)
     - GoogleUtilities/AppDelegateSwizzler (~> 8.1)
     - GoogleUtilities/Environment (~> 8.1)
     - GTMSessionFetcher/Core (< 6.0, >= 3.4)
     - RecaptchaInterop (~> 101.0)
-  - FirebaseAuthInterop (12.3.0)
-  - FirebaseCore (12.3.0):
-    - FirebaseCoreInternal (~> 12.3.0)
+  - FirebaseAuthInterop (12.1.0)
+  - FirebaseCore (12.1.0):
+    - FirebaseCoreInternal (~> 12.1.0)
     - GoogleUtilities/Environment (~> 8.1)
     - GoogleUtilities/Logger (~> 8.1)
-  - FirebaseCoreExtension (12.3.0):
-    - FirebaseCore (~> 12.3.0)
-  - FirebaseCoreInternal (12.3.0):
+  - FirebaseCoreExtension (12.1.0):
+    - FirebaseCore (~> 12.1.0)
+  - FirebaseCoreInternal (12.1.0):
     - "GoogleUtilities/NSData+zlib (~> 8.1)"
-  - FirebaseFirestore (12.3.0):
-    - FirebaseCore (~> 12.3.0)
-    - FirebaseCoreExtension (~> 12.3.0)
-    - FirebaseFirestoreInternal (~> 12.3.0)
-    - FirebaseSharedSwift (~> 12.3.0)
-  - FirebaseFirestoreInternal (12.3.0):
+  - FirebaseFirestore (12.1.0):
+    - FirebaseCore (~> 12.1.0)
+    - FirebaseCoreExtension (~> 12.1.0)
+    - FirebaseFirestoreInternal (~> 12.1.0)
+    - FirebaseSharedSwift (~> 12.1.0)
+  - FirebaseFirestoreInternal (12.1.0):
     - abseil/algorithm (~> 1.20240722.0)
     - abseil/base (~> 1.20240722.0)
     - abseil/container/flat_hash_map (~> 1.20240722.0)
@@ -1242,18 +1242,18 @@ PODS:
     - abseil/strings/strings (~> 1.20240722.0)
     - abseil/time (~> 1.20240722.0)
     - abseil/types (~> 1.20240722.0)
-    - FirebaseAppCheckInterop (~> 12.3.0)
-    - FirebaseCore (~> 12.3.0)
+    - FirebaseAppCheckInterop (~> 12.1.0)
+    - FirebaseCore (~> 12.1.0)
     - "gRPC-C++ (~> 1.69.0)"
     - gRPC-Core (~> 1.69.0)
     - leveldb-library (~> 1.22)
     - nanopb (~> 3.30910.0)
-  - FirebaseSharedSwift (12.3.0)
-  - FirebaseStorage (12.3.0):
-    - FirebaseAppCheckInterop (~> 12.3.0)
-    - FirebaseAuthInterop (~> 12.3.0)
-    - FirebaseCore (~> 12.3.0)
-    - FirebaseCoreExtension (~> 12.3.0)
+  - FirebaseSharedSwift (12.1.0)
+  - FirebaseStorage (12.1.0):
+    - FirebaseAppCheckInterop (~> 12.1.0)
+    - FirebaseAuthInterop (~> 12.1.0)
+    - FirebaseCore (~> 12.1.0)
+    - FirebaseCoreExtension (~> 12.1.0)
     - GoogleUtilities/Environment (~> 8.1)
     - GTMSessionFetcher/Core (< 6.0, >= 3.4)
   - fmt (11.0.2)
@@ -3021,10 +3021,6 @@ PODS:
     - React-RCTFBReactNativeSpec
     - ReactCommon/turbomodule/core
     - SocketRocket
-  - react-native-config (1.5.9):
-    - react-native-config/App (= 1.5.9)
-  - react-native-config/App (1.5.9):
-    - React-Core
   - react-native-image-picker (8.2.1):
     - boost
     - DoubleConversion
@@ -3054,9 +3050,9 @@ PODS:
     - ReactCommon/turbomodule/core
     - SocketRocket
     - Yoga
-  - react-native-maps (1.26.14):
-    - react-native-maps/Maps (= 1.26.14)
-  - react-native-maps/Generated (1.26.14):
+  - react-native-maps (1.26.17):
+    - react-native-maps/Maps (= 1.26.17)
+  - react-native-maps/Generated (1.26.17):
     - boost
     - DoubleConversion
     - fast_float
@@ -3085,7 +3081,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - SocketRocket
     - Yoga
-  - react-native-maps/Maps (1.26.14):
+  - react-native-maps/Maps (1.26.17):
     - boost
     - DoubleConversion
     - fast_float
@@ -3827,19 +3823,19 @@ PODS:
     - ReactCommon/turbomodule/core
     - SocketRocket
     - Yoga
-  - RNFBApp (23.4.0):
-    - Firebase/CoreOnly (= 12.3.0)
+  - RNFBApp (23.0.0):
+    - Firebase/CoreOnly (= 12.1.0)
     - React-Core
-  - RNFBAuth (23.4.0):
-    - Firebase/Auth (= 12.3.0)
-    - React-Core
-    - RNFBApp
-  - RNFBFirestore (23.4.0):
-    - Firebase/Firestore (= 12.3.0)
+  - RNFBAuth (23.0.0):
+    - Firebase/Auth (= 12.1.0)
     - React-Core
     - RNFBApp
-  - RNFBStorage (23.4.0):
-    - Firebase/Storage (= 12.3.0)
+  - RNFBFirestore (23.0.0):
+    - Firebase/Firestore (= 12.1.0)
+    - React-Core
+    - RNFBApp
+  - RNFBStorage (23.0.0):
+    - Firebase/Storage (= 12.1.0)
     - React-Core
     - RNFBApp
   - RNGestureHandler (2.28.0):
@@ -3872,7 +3868,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - SocketRocket
     - Yoga
-  - RNScreens (4.16.0):
+  - RNScreens (4.17.1):
     - boost
     - DoubleConversion
     - fast_float
@@ -3900,10 +3896,10 @@ PODS:
     - ReactCodegen
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
-    - RNScreens/common (= 4.16.0)
+    - RNScreens/common (= 4.17.1)
     - SocketRocket
     - Yoga
-  - RNScreens/common (4.16.0):
+  - RNScreens/common (4.17.1):
     - boost
     - DoubleConversion
     - fast_float
@@ -4007,7 +4003,6 @@ DEPENDENCIES:
   - React-logger (from `../node_modules/react-native/ReactCommon/logger`)
   - React-Mapbuffer (from `../node_modules/react-native/ReactCommon`)
   - React-microtasksnativemodule (from `../node_modules/react-native/ReactCommon/react/nativemodule/microtasks`)
-  - react-native-config (from `../node_modules/react-native-config`)
   - react-native-image-picker (from `../node_modules/react-native-image-picker`)
   - react-native-maps (from `../node_modules/react-native-maps`)
   - react-native-pager-view (from `../node_modules/react-native-pager-view`)
@@ -4161,8 +4156,6 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon"
   React-microtasksnativemodule:
     :path: "../node_modules/react-native/ReactCommon/react/nativemodule/microtasks"
-  react-native-config:
-    :path: "../node_modules/react-native-config"
   react-native-image-picker:
     :path: "../node_modules/react-native-image-picker"
   react-native-maps:
@@ -4261,17 +4254,17 @@ SPEC CHECKSUMS:
   DoubleConversion: cb417026b2400c8f53ae97020b2be961b59470cb
   fast_float: b32c788ed9c6a8c584d114d0047beda9664e7cc6
   FBLazyVector: 86588b5a1547e7a417942a08f49559b184e002c8
-  Firebase: f5439b235721ceeef14ca1f327c0da8e4e8556b5
-  FirebaseAppCheckInterop: 3a8527abb8bb89fb1bd2bd3d1d7b463c0ceb0cbf
-  FirebaseAuth: 4fdd7ee2da745f79145124f5191639d2ea756a77
-  FirebaseAuthInterop: a7c394818a93d374c543ca085f3a46ab7c71372e
-  FirebaseCore: ff47fe1ad3ab9ef66edd3e8bc4647b493d2067f8
-  FirebaseCoreExtension: 898ca55c7cb126f83747b32cb0daa95394b10853
-  FirebaseCoreInternal: a9e1ff270f217489d9258563b693d11a312903bf
-  FirebaseFirestore: 93138b63239303eeb035d922920f4e48216f0c2d
-  FirebaseFirestoreInternal: 81150153b7b25b5eee4633cc5c7f08ab83bda966
-  FirebaseSharedSwift: a08758c5e2617f3ebb47865b45ecca6f02cd35ea
-  FirebaseStorage: 23c8869d6e9d93f159766c4f81f6ead6410aff4f
+  Firebase: 9edc9acf71313eb20e209c42e5469a42564fe1aa
+  FirebaseAppCheckInterop: de890554a81967f16a0eb8d3def541c2bb42dece
+  FirebaseAuth: 6d0f2d449195c401e6d6ef1a891fff22bc60356d
+  FirebaseAuthInterop: ede927b03baf02453e6e9de2df513cc28d3eb742
+  FirebaseCore: 5a452ffa66f37c8e281076996837626c5d08c090
+  FirebaseCoreExtension: dd89d73548ee9be5d8dc60e5c76bc421b965853b
+  FirebaseCoreInternal: ff526c22671bb564d1b34a47615e29ba99389dee
+  FirebaseFirestore: 7f06732c905092d12a6e060aace72a28ad528190
+  FirebaseFirestoreInternal: 1e6d681414d7fe2b8b99315784e242e7f301cf44
+  FirebaseSharedSwift: ee4344de8a4d5b5290de3600667307a44f85fd40
+  FirebaseStorage: 91432ddfb31e83de1e9fa5833b4399b39bc722f7
   fmt: a40bb5bd0294ea969aaaba240a927bd33d878cdd
   glog: 5683914934d5b6e4240e497e0f4a3b42d1854183
   GoogleUtilities: 00c88b9a86066ef77f0da2fab05f65d7768ed8e1
@@ -4314,9 +4307,8 @@ SPEC CHECKSUMS:
   React-logger: 7cfc7b1ae1f8e5fe5097f9c746137cc3a8fad4ce
   React-Mapbuffer: 8f620d1794c6b59a8c3862c3ae820a2e9e6c9bb0
   React-microtasksnativemodule: dcf5321c9a41659a6718df8a5f202af1577c6825
-  react-native-config: d08b60865268872495a43e211059b4606131fe01
   react-native-image-picker: 9bceb747cd6cde22a3416ffdc819d11b5b11f156
-  react-native-maps: 8bcb5ff195d6cf124752fe66c7e6be421520ce0a
+  react-native-maps: a7e8f6b36e5ce1b594d9aba427e13b40016a67b6
   react-native-pager-view: c4eb191519def25f8983e636c1d387a7e33a21c4
   react-native-safe-area-context: 4df6c897ab5bd841a5bba6f734785c0c9ef4c206
   react-native-video: 8681d42fce8dd45b1b7e7d9b54c9c054c99229ae
@@ -4353,16 +4345,16 @@ SPEC CHECKSUMS:
   ReactCommon: ec1cdf708729338070f8c4ad746768a782fd9eb1
   RecaptchaInterop: 11e0b637842dfb48308d242afc3f448062325aba
   RNCAsyncStorage: f30b3a83064e28b0fc46f1fbd3834589ed64c7b9
-  RNFBApp: 0211ae65fadcb017cc787b2bd539847330687b93
-  RNFBAuth: 867bf4293ca2d48c7266d9eff9e970f882331578
-  RNFBFirestore: bde0e0ad46387b6e88fdefa530fcdcba0468c538
-  RNFBStorage: 5c21c866bfd7c9e1c0c2f25d5de1a424b83f620e
+  RNFBApp: e059b9c22b75d3937ddb17f14958c76c1fe73845
+  RNFBAuth: 0bdb5960470f7d8ac287feff8146f86bee3c7671
+  RNFBFirestore: af29fb5f932a6fefa658119f22d9ca0f19681643
+  RNFBStorage: 4c9ed291257a3d9984470b855b9c343b00460b5a
   RNGestureHandler: a52292df4f8fc7daab354ad2c37be401d4c3bed8
-  RNScreens: 8132b09d1edf29ba411894b19bb05f25277b2c64
+  RNScreens: e3c13cd8016411d9b96603d8779535d9288c1458
   RNVectorIcons: 0567525e0a344458329daa09068cf9e8090ec791
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
   Yoga: ce248fb32065c9b00451491b06607f1c25b2f1ed
 
-PODFILE CHECKSUM: d8dd003928bea53f587ca8e318f2361ce637eb04
+PODFILE CHECKSUM: cdb798ba6a5e23a81dfd9240a38d750201b33d37
 
 COCOAPODS: 1.16.2

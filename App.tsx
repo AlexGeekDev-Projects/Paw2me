@@ -1,25 +1,63 @@
 // App.tsx
 import React from 'react';
 import RootNavigator from '@navigation/RootNavigator';
-import Config from 'react-native-config';
-import { initGeocoder } from '@services/geoService';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { setGeocodingKey } from '@services/geoService';
+import { GOOGLE_MAPS_GEOCODING_KEY } from '@config/appConfig';
+import { useResolvedTheme } from '@hooks/useResolvedTheme';
+import { useInitTheme } from '@hooks/useInitTheme';
+import { PaperProvider, ActivityIndicator } from 'react-native-paper';
+import { View, StyleSheet } from 'react-native';
 
-const GEOCODING_KEY = (Config as Record<string, string | undefined>)[
-  'GOOGLE_MAPS_GEOCODING_KEY'
-];
-if (GEOCODING_KEY && GEOCODING_KEY.length > 0) {
-  initGeocoder(GEOCODING_KEY);
+if (GOOGLE_MAPS_GEOCODING_KEY?.length > 0) {
+  setGeocodingKey(GOOGLE_MAPS_GEOCODING_KEY);
 } else {
-  console.warn(
-    '[geo] GOOGLE_MAPS_GEOCODING_KEY no está definida. No habrá reverse geocoding.',
-  );
+  console.warn('[geo] GOOGLE_MAPS_GEOCODING_KEY no está definida.');
 }
 
-const App = () => (
-  <GestureHandlerRootView style={{ flex: 1 }}>
-    <RootNavigator />
-  </GestureHandlerRootView>
-);
+const ThemedBackground: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const { theme } = useResolvedTheme();
+  return (
+    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
+      {children}
+    </View>
+  );
+};
+
+const App = () => {
+  const themeReady = useInitTheme();
+  const { theme } = useResolvedTheme();
+
+  if (!themeReady) {
+    return (
+      <GestureHandlerRootView style={styles.root}>
+        <View
+          style={[
+            styles.root,
+            { justifyContent: 'center', alignItems: 'center' },
+          ]}
+        >
+          <ActivityIndicator animating size="large" />
+        </View>
+      </GestureHandlerRootView>
+    );
+  }
+
+  return (
+    <GestureHandlerRootView style={styles.root}>
+      <PaperProvider theme={theme}>
+        <ThemedBackground>
+          <RootNavigator />
+        </ThemedBackground>
+      </PaperProvider>
+    </GestureHandlerRootView>
+  );
+};
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+});
 
 export default App;

@@ -14,7 +14,11 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const AuthNavigator: React.FC = () => (
   <Stack.Navigator screenOptions={{ headerShown: false }}>
     <Stack.Screen name="Login" component={LoginScreen} />
-    <Stack.Screen name="Register" component={RegisterScreen} />
+    <Stack.Screen
+      name="Register"
+      component={RegisterScreen}
+      options={{ headerShown: false }}
+    />
     <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
   </Stack.Navigator>
 );

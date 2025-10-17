@@ -1,4 +1,5 @@
 export type AnimalStatus = 'disponible' | 'en_proceso' | 'adoptado' | 'oculto';
+
 export type Species =
   | 'perro'
   | 'gato'
@@ -34,6 +35,7 @@ export interface AnimalCore {
     city?: string;
     geo?: { lat: number; lng: number };
   };
+  address?: string;
 }
 
 export interface AnimalDoc extends AnimalCore {
@@ -46,14 +48,16 @@ export interface AnimalDoc extends AnimalCore {
   updatedAt: number;
   coverUrl?: string;
   mediaCount?: number;
+  pawId?: string;
+  createdByPlatform?: 'ios' | 'android' | 'web';
+  visibility?: 'public' | 'hidden' | 'banned';
+  tags?: string[];
+  address?: string;
+  images?: string[]; // ← nuevo
+  matchCount?: number; // ← reemplazo de favoriteCount
 }
 
-export type NewAnimalInput = Omit<
-  AnimalDoc,
-  'id' | 'createdAt' | 'updatedAt' | 'mediaCount'
-> & {
-  mediaCount?: number;
-};
+export type NewAnimalInput = Omit<AnimalDoc, 'id' | 'createdAt' | 'updatedAt'>;
 
 export interface AnimalCardVM {
   id: string;
@@ -61,8 +65,6 @@ export interface AnimalCardVM {
   species: Species;
   status: AnimalStatus;
   chips: string[];
-
-  // Opcionales (exactOptionalPropertyTypes friendly):
   city?: string;
   coverUrl?: string;
   urgent?: boolean;

@@ -1,24 +1,18 @@
-// src/services/geoService.ts
-import Config from 'react-native-config';
+import { GOOGLE_MAPS_GEOCODING_KEY } from '@config/appConfig';
 
 export type GeoInfo = {
   formattedAddress?: string;
-  countryCode?: string; // ISO-3166-1 alpha-2 (MX, US, ...)
+  countryCode?: string;
   city?: string;
 };
 
-let GEOCODING_KEY: string | undefined;
+let GEOCODING_KEY: string = (GOOGLE_MAPS_GEOCODING_KEY || '').trim();
 
-export const initGeocoder = (key: string) => {
-  GEOCODING_KEY = key;
+export const setGeocodingKey = (key: string) => {
+  GEOCODING_KEY = (key || '').trim();
 };
 
-type GoogleComp = {
-  long_name: string;
-  short_name: string;
-  types: string[];
-};
-
+type GoogleComp = { long_name: string; short_name: string; types: string[] };
 type GoogleResult = {
   formatted_address: string;
   address_components: GoogleComp[];
@@ -55,30 +49,17 @@ export const reverseGeocode = async (
   try {
     const r = await fetch(url);
     const json: any = await r.json();
-
     const status: string = json?.status ?? 'UNKNOWN';
     if (status !== 'OK') {
       const em = json?.error_message;
       console.warn('[geo] Geocoding status:', status, em ? `| ${em}` : '');
       return null;
     }
-
     const first: GoogleResult | undefined = json.results?.[0];
-    if (!first) {
-      console.warn('[geo] Geocoding sin results');
-      return null;
-    }
+    if (!first) return null;
     return extract(first);
   } catch (e) {
     console.warn('[geo] Geocoding fetch error:', e);
     return null;
   }
 };
-
-// Inicializa con .env si existe:
-const KEY_FROM_ENV = (Config as Record<string, string | undefined>)[
-  'GOOGLE_MAPS_GEOCODING_KEY'
-];
-if (KEY_FROM_ENV && KEY_FROM_ENV.length > 0) {
-  GEOCODING_KEY = KEY_FROM_ENV;
-}

@@ -14,11 +14,12 @@ import {
   type FirebaseFirestoreTypes,
 } from '@services/firebase';
 import type { AnimalDoc, NewAnimalInput, AnimalCardVM } from '@models/animal';
+import { Platform } from 'react-native';
 
-// ✅ util público para generar ID de animal
-export const newAnimalId = () => doc(collection(getFirestore(), 'animals')).id;
+export const newAnimalId = (): string =>
+  doc(collection(getFirestore(), 'paws')).id;
 
-export const animalsColRef = () => collection(getFirestore(), 'animals');
+export const animalsColRef = () => collection(getFirestore(), 'paws');
 
 const toCard = (d: AnimalDoc): AnimalCardVM => ({
   id: d.id,
@@ -65,24 +66,35 @@ export const listAnimalsPublic = async (opts?: {
 };
 
 export const getAnimalById = async (id: string) => {
-  const ref = doc(getFirestore(), 'animals', id);
+  const ref = doc(getFirestore(), 'paws', id);
   const s = await getDoc(ref);
   if (!s.exists()) return undefined;
   return { id: s.id, ...(s.data() as Omit<AnimalDoc, 'id'>) };
 };
 
 export const createAnimal = async (id: string, input: NewAnimalInput) => {
-  const refDoc = doc(getFirestore(), 'animals', id);
+  const refDoc = doc(getFirestore(), 'paws', id);
   const now = nowTs();
 
-  const payload: Record<string, unknown> = {
-    ...input, // location incluido tal cual
+  const payload: NewAnimalInput & {
+    createdAt: FirebaseFirestoreTypes.FieldValue;
+    updatedAt: FirebaseFirestoreTypes.FieldValue;
+  } = {
+    ...input,
     createdAt: now,
     updatedAt: now,
-    ...(typeof input.mediaCount === 'number'
-      ? { mediaCount: input.mediaCount }
-      : {}),
-    ...(input.coverUrl ? { coverUrl: input.coverUrl } : {}),
+    pawId: id, // añadido para tenerlo dentro del doc
+    createdByPlatform:
+      Platform.OS === 'ios' ||
+      Platform.OS === 'android' ||
+      Platform.OS === 'web'
+        ? Platform.OS
+        : 'web', // o simplemente omitir el campo si no es compatible
+    visibility: 'public',
+    tags: [],
+    matchCount: 0,
+    ...(input.images ? { images: input.images } : {}),
+    ...(input.address ? { address: input.address } : {}),
   };
 
   await setDoc(refDoc, payload);
@@ -92,14 +104,13 @@ export const updateAnimalPartial = async (
   id: string,
   patch: Partial<NewAnimalInput>,
 ) => {
-  const refDoc = doc(getFirestore(), 'animals', id);
+  const refDoc = doc(getFirestore(), 'paws', id);
   const clean = Object.fromEntries(
     Object.entries(patch).filter(([, v]) => v !== undefined),
-  );
+  ) as Partial<NewAnimalInput>;
   await setDoc(refDoc, { ...clean, updatedAt: nowTs() }, { merge: true });
 };
 
-// 👉 Exporta tipos/funciones que faltaban
 export interface MyAnimalItem {
   id: string;
   name: string;

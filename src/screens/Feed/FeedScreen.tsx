@@ -16,6 +16,7 @@ import { getAuth } from '@services/firebase';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import type { RootStackParamList } from '@navigation/RootNavigator';
+import Screen from '@components/layout/Screen';
 
 const FeedScreen: React.FC = () => {
   const [items, setItems] = useState<PostCardVM[]>([]);
@@ -78,11 +79,7 @@ const FeedScreen: React.FC = () => {
   );
 
   return (
-    <>
-      <Appbar.Header mode="center-aligned">
-        <Appbar.Content title="Feed" />
-      </Appbar.Header>
-
+    <Screen>
       {loading ? (
         <Loading variant="skeleton-card-list" count={4} />
       ) : (
@@ -103,7 +100,7 @@ const FeedScreen: React.FC = () => {
         style={{ position: 'absolute', right: 16, bottom: 24 }}
         onPress={() => navigation.navigate('CreatePost')}
       />
-    </>
+    </Screen>
   );
 };
 

@@ -1,14 +1,25 @@
+// src/screens/Auth/LoginScreen.tsx
 import React, { useState } from 'react';
-import { Image, StyleSheet, View } from 'react-native';
-import { Button, TextInput, Text } from 'react-native-paper';
+import {
+  Image,
+  StyleSheet,
+  View,
+  KeyboardAvoidingView,
+  ScrollView,
+  Platform,
+} from 'react-native';
+import { Button, TextInput, Text, useTheme } from 'react-native-paper';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@navigation/RootNavigator';
 import { signInEmail } from '@services/authService';
 import { appLogo } from '@assets/images';
+import Screen from '@components/layout/Screen';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
 
 const LoginScreen: React.FC<Props> = ({ navigation }) => {
+  const { colors } = useTheme();
+
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
   const [busy, setBusy] = useState(false);
@@ -27,62 +38,115 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
   };
 
   return (
-    <View style={styles.container}>
-      <Image source={appLogo} style={styles.logo} resizeMode="contain" />
-      <Text variant="headlineSmall" style={styles.title}>
-        Bienvenido
-      </Text>
-
-      <TextInput
-        label="Email"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        keyboardType="email-address"
-        style={styles.input}
-      />
-      <TextInput
-        label="Contraseña"
-        value={pass}
-        onChangeText={setPass}
-        secureTextEntry
-        style={styles.input}
-      />
-
-      {err ? <Text style={styles.error}>{err}</Text> : null}
-
-      <Button
-        mode="contained"
-        onPress={onLogin}
-        loading={busy}
-        disabled={busy}
-        style={styles.btn}
+    <Screen>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={64}
       >
-        Entrar
-      </Button>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.container}>
+            <Image source={appLogo} style={styles.logo} resizeMode="contain" />
 
-      <Button onPress={() => navigation.navigate('ForgotPassword')}>
-        ¿Olvidaste tu contraseña?
-      </Button>
-      <Button onPress={() => navigation.navigate('Register')}>
-        Crear cuenta
-      </Button>
-    </View>
+            <Text variant="headlineMedium" style={styles.title}>
+              ¡Hola de nuevo!
+            </Text>
+            <Text
+              variant="bodyMedium"
+              style={{ marginBottom: 16, opacity: 0.7 }}
+            >
+              Inicia sesión para continuar
+            </Text>
+
+            <TextInput
+              label="Correo electrónico"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              left={<TextInput.Icon icon="email-outline" />}
+              style={styles.input}
+            />
+            <TextInput
+              label="Contraseña"
+              value={pass}
+              onChangeText={setPass}
+              secureTextEntry
+              left={<TextInput.Icon icon="lock-outline" />}
+              style={styles.input}
+            />
+
+            {err ? (
+              <Text style={[styles.error, { color: colors.error }]}>{err}</Text>
+            ) : null}
+
+            <Button
+              mode="contained"
+              onPress={onLogin}
+              loading={busy}
+              disabled={busy}
+              style={styles.btn}
+              contentStyle={{ paddingVertical: 6 }}
+            >
+              Entrar
+            </Button>
+
+            <View style={styles.links}>
+              <Button
+                onPress={() => navigation.navigate('ForgotPassword')}
+                compact
+              >
+                ¿Olvidaste tu contraseña?
+              </Button>
+              <Button onPress={() => navigation.navigate('Register')} compact>
+                Crear cuenta nueva
+              </Button>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Screen>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 16,
-    alignItems: 'center',
+  scroll: {
+    flexGrow: 1,
     justifyContent: 'center',
+    padding: 16,
   },
-  logo: { width: 160, height: 160, marginBottom: 12 },
-  title: { marginBottom: 8 },
-  input: { width: '100%', marginBottom: 8 },
-  btn: { width: '100%', marginTop: 4 },
-  error: { color: '#b00020', alignSelf: 'flex-start', marginBottom: 8 },
+  container: {
+    alignItems: 'center',
+  },
+  logo: {
+    width: 140,
+    height: 140,
+    marginBottom: 16,
+  },
+  title: {
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  input: {
+    width: '100%',
+    marginBottom: 12,
+  },
+  btn: {
+    width: '100%',
+    marginTop: 8,
+    borderRadius: 8,
+  },
+  links: {
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  error: {
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+  },
 });
 
 export default LoginScreen;

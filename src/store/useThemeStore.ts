@@ -1,34 +1,38 @@
+// src/store/useThemeStore.ts
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Appearance } from 'react-native';
 
-export type ThemeMode = 'light' | 'dark' | 'system';
+type ThemeMode = 'light' | 'dark';
 
-type ThemeState = {
-  mode: ThemeMode;
-  dark: boolean;
-  setMode: (mode: ThemeMode) => void;
-};
+interface ThemeState {
+  theme: ThemeMode;
+  setTheme: (mode: ThemeMode) => void;
+  toggleTheme: () => void;
+  init: () => Promise<void>;
+}
 
-const computeDark = (mode: ThemeMode): boolean => {
-  if (mode === 'dark') return true;
-  if (mode === 'light') return false;
-  return Appearance.getColorScheme() === 'dark';
-};
+const THEME_KEY = 'app_theme';
 
-export const useThemeStore = create<ThemeState>()(
-  persist(
-    (set, get) => ({
-      mode: 'system',
-      dark: computeDark('system'),
-      setMode: mode => set({ mode, dark: computeDark(mode) }),
-    }),
-    {
-      name: 'paw2me-theme',
-      storage: createJSONStorage(() => AsyncStorage),
-      version: 1,
-      partialize: s => ({ mode: s.mode }), // solo guardamos el modo; 'dark' se recalcula
-    },
-  ),
-);
+export const useThemeStore = create<ThemeState>(set => ({
+  theme: 'light',
+
+  setTheme: mode => {
+    AsyncStorage.setItem(THEME_KEY, mode);
+    set({ theme: mode });
+  },
+
+  toggleTheme: () => {
+    set(state => {
+      const next = state.theme === 'dark' ? 'light' : 'dark';
+      AsyncStorage.setItem(THEME_KEY, next);
+      return { theme: next };
+    });
+  },
+
+  init: async () => {
+    const saved = await AsyncStorage.getItem(THEME_KEY);
+    if (saved === 'dark' || saved === 'light') {
+      set({ theme: saved });
+    }
+  },
+}));

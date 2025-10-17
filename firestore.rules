@@ -1,0 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
+    function hasRole(role) { return isSignedIn() && role in request.auth.token && request.auth.token[role] == true; }
+    function isModerator() { return hasRole('moderator') || hasRole('admin') || hasRole('super_admin') || hasRole('owner'); }
+
+    function statusValid(s) {
+      return s in ['disponible','en_proceso','adoptado','oculto'];
+    }
+
+    function validGeo(g) {
+      return (g.lat is number) && (g.lng is number)
+        && g.lat >= -90 && g.lat <= 90
+        && g.lng >= -180 && g.lng <= 180;
+    }
+
+    match /paws/{pawId} {
+      allow read: if true;
+
+      allow create: if isSignedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerType in ['persona','refugio']
+        && statusValid(request.resource.data.status)
+        && (
+          !(request.resource.data.location is map)
+          || !('geo' in request.resource.data.location)
+          || validGeo(request.resource.data.location.geo)
+        );
+
+      allow update: if (
+        (isOwner(resource.data.ownerUid) || isModerator())
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.ownerType == resource.data.ownerType
+        && statusValid(request.resource.data.status)
+        && (
+          !(request.resource.data.location is map)
+          || !('geo' in request.resource.data.location)
+          || validGeo(request.resource.data.location.geo)
+        )
+      );
+
+      allow delete: if isOwner(resource.data.ownerUid) || isModerator();
+
+      // posts sociales del animal
+      match /posts/{postId} {
+        allow read: if true;
+
+        allow create: if isSignedIn()
+          && request.resource.data.authorUid == request.auth.uid
+          && request.resource.data.status in ['active','hidden'];
+
+        allow update: if (isOwner(resource.data.authorUid) || isModerator());
+        allow delete: if isOwner(resource.data.authorUid) || isModerator();
+
+        match /reactions/{uid} {
+          allow read: if true;
+          allow create, update, delete: if isSignedIn() && request.auth.uid == uid;
+        }
+
+        match /comments/{commentId} {
+          allow read: if true;
+          allow create: if isSignedIn() && request.resource.data.authorUid == request.auth.uid;
+          allow update, delete: if isOwner(resource.data.authorUid) || isModerator();
+        }
+      }
+    }
+
+    match /users/{uid} {
+      allow read: if true;
+      allow create: if isOwner(uid);
+      allow update, delete: if isOwner(uid) || isModerator();
+    }
+  }
+}

@@ -16,6 +16,8 @@ module.exports = {
         '@models': './src/models',
         '@data': './src/data',
         '@assets': './src/assets',
+        '@native': './src/native',
+        '@config': './src/config',
       },
     }],
   ],
