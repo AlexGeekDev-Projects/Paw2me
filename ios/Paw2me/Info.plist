@@ -32,9 +32,11 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Para tomar fotos y videos de los animales.</string>
+	<string>Para tomar fotos y videos de las huellitas.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string/>
+	<string>Usamos tu ubicación para mostrar huellitas cercanas.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Usamos tu ubicación para mostrar huellitas cercanas.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Para guardar fotos en tu galería.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

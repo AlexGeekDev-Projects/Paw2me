@@ -36,6 +36,7 @@ export interface AnimalCore {
     geo?: { lat: number; lng: number };
   };
   address?: string;
+  story?: string;
 }
 
 export interface AnimalDoc extends AnimalCore {

@@ -1,3 +1,4 @@
+// src/services/geoService.ts
 import { GOOGLE_MAPS_GEOCODING_KEY } from '@config/appConfig';
 
 export type GeoInfo = {
@@ -44,7 +45,7 @@ export const reverseGeocode = async (
 
   const url =
     `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}` +
-    `&language=es&result_type=street_address|route|locality&key=${GEOCODING_KEY}`;
+    `&language=es&region=mx&result_type=street_address|route|locality&key=${GEOCODING_KEY}`;
 
   try {
     const r = await fetch(url);
