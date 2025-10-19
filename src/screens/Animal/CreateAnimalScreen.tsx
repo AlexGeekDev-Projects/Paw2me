@@ -267,16 +267,52 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
     visible: false,
   });
 
+  // ——— Computados auxiliares
+  const hasAnyPhoto = useMemo(() => {
+    const coverOk = !!(cover && (hasUri(cover) || hasBase64(cover)));
+    const galOk = gallery.some(a => hasUri(a) || hasBase64(a));
+    return coverOk || galOk;
+  }, [cover, gallery]);
+
+  // ——— Validaciones FULL obligatorias
   const errors = useMemo(() => {
     const e: string[] = [];
     const age = Number(ageMonths);
+
     if (!name.trim()) e.push('El nombre es obligatorio.');
     if (!story.trim()) e.push('La historia es obligatoria.');
-    if (!ageUnknown && (!Number.isFinite(age) || age < 0 || age > 600))
+
+    if (!ageUnknown && (!Number.isFinite(age) || age < 0 || age > 600)) {
       e.push('Edad (meses) inválida.');
+    }
+
     if (!geo) e.push('Selecciona la ubicación en el mapa.');
+    if (!derivedCountry)
+      e.push(
+        'No pudimos derivar el país. Toca el mapa o usa “Usar mi ubicación”.',
+      );
+
+    if (!hasAnyPhoto) e.push('Agrega al menos una foto.');
+
+    if (!mixedBreed && (!breedCode || breedCode === 'mestizo')) {
+      e.push('Selecciona la raza.');
+    }
+
+    if (tags.length === 0) e.push('Selecciona al menos una etiqueta.');
+
     return e;
-  }, [name, story, ageMonths, ageUnknown, geo]);
+  }, [
+    name,
+    story,
+    ageMonths,
+    ageUnknown,
+    geo,
+    derivedCountry,
+    hasAnyPhoto,
+    mixedBreed,
+    breedCode,
+    tags.length,
+  ]);
 
   const pickImages = useCallback(async () => {
     const res = await launchImageLibrary(imgPickerOpts);
@@ -323,9 +359,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
       if (idx < 0 || idx >= prev.length) return prev;
       const arr = prev.slice();
       const [item] = arr.splice(idx, 1);
-      if (item) {
-        arr.unshift(item);
-      }
+      if (item) arr.unshift(item);
       return arr;
     });
   }, []);
@@ -360,7 +394,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
         Number(ageMonths) >= 0 &&
         Number(ageMonths) <= 600));
   const step2Done = Boolean(geo);
-  const step3Done = Boolean(cover) || gallery.length > 0; // opcional
+  const step3Done = hasAnyPhoto; // ahora obligatorio
   const stepProgress =
     (Number(step1Done) + Number(step2Done) + Number(step3Done)) / 3;
 
@@ -465,53 +499,6 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
 
   // ——— Submit
   const onSubmit = useCallback(async () => {
-    // ——— Helpers ———
-    const _uriScheme = (u?: string) => (u?.split(':')[0] ?? '').toLowerCase();
-    const _ctFromName = (fileName?: string): ImgContentType => {
-      const ext = (fileName ?? '').toLowerCase();
-      if (ext.endsWith('.png')) return 'image/png';
-      if (ext.endsWith('.webp')) return 'image/webp';
-      if (ext.endsWith('.heic') || ext.endsWith('.heif')) return 'image/heic';
-      return 'image/jpeg';
-    };
-    const _extFromCT = (ct: ImgContentType) =>
-      ct === 'image/png'
-        ? 'png'
-        : ct === 'image/webp'
-          ? 'webp'
-          : ct === 'image/heic' || ct === 'image/heif'
-            ? 'heic'
-            : 'jpg';
-
-    type _BaseUpload = { fileName: string; contentType: ImgContentType };
-    type _UploadParams =
-      | (_BaseUpload & { kind: 'base64'; base64: string })
-      | (_BaseUpload & { kind: 'local'; localUri: string });
-
-    const _toUploadParams = (
-      a: Asset,
-      index: number,
-      prefix: string,
-    ): _UploadParams | null => {
-      const ct = _ctFromName(a.fileName);
-      const ext = _extFromCT(ct);
-      const fileName = `${prefix}-${index + 1}.${ext}`;
-
-      if (hasBase64(a)) {
-        return { kind: 'base64', base64: a.base64!, fileName, contentType: ct };
-      }
-      if (hasUri(a)) {
-        const scheme = _uriScheme(a.uri);
-        // iOS: 'ph://' no sirve para putFile; si no hay base64, se omite
-        if (Platform.OS === 'ios' && scheme === 'ph') return null;
-        if (scheme === 'file' || scheme === 'content') {
-          return { kind: 'local', localUri: a.uri!, fileName, contentType: ct };
-        }
-      }
-      return null;
-    };
-
-    // ——— Validaciones rápidas ———
     if (errors.length > 0 || !geo) return;
 
     setSubmitting(true);
@@ -529,12 +516,12 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
     const animalId = newAnimalId();
 
     // Normaliza lotes
-    const coverParams = cover ? _toUploadParams(cover, 0, 'cover') : null;
-    const galleryParams: _UploadParams[] = [];
+    const coverParams = cover ? toUploadParams(cover, 0, 'cover') : null;
+    const galleryParams: UploadParams[] = [];
     const mediaWarnings: string[] = [];
 
     gallery.forEach((a, i) => {
-      const p = _toUploadParams(a, i, 'img');
+      const p = toUploadParams(a, i, 'img');
       if (p) galleryParams.push(p);
       else
         mediaWarnings.push(
@@ -623,10 +610,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
       }
 
       // Galería
-      for (let i = 0; i < galleryParams.length; i++) {
-        const p = galleryParams[i]; // con noUncheckedIndexedAccess es T | undefined
-        if (!p) continue; // ← guard obligatorio
-
+      for (const [i, p] of galleryParams.entries()) {
         try {
           const uploadArgs =
             p.kind === 'base64'
@@ -672,8 +656,14 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
         await AsyncStorage.removeItem(DRAFT_KEY);
       } catch {}
 
-      // Redirección (ajústalo a tu navigator si fuera necesario)
-      navigation.replace('AnimalDetail', { id: animalId });
+      // Redirección al detalle anidado en Feed
+      (navigation as any).navigate('AppTabs', {
+        screen: 'FeedTab',
+        params: {
+          screen: 'AnimalDetail',
+          params: { id: animalId },
+        },
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Error inesperado';
       console.error('[publish] fatal error', msg);
@@ -701,6 +691,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
     derivedCountry,
     derivedCity,
     derivedAddress,
+    tags.length,
     navigation,
   ]);
 
@@ -756,7 +747,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
           nestedScrollEnabled
         >
           {/* Nombre */}
-          <Section title="Nombre" top={0}>
+          <Section title="Nombre *" top={0}>
             <TextInput
               mode="outlined"
               dense
@@ -768,7 +759,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
           </Section>
 
           {/* Especie */}
-          <Section title="Especie">
+          <Section title="Especie *">
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -788,7 +779,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
           </Section>
 
           {/* Tamaño */}
-          <Section title="Tamaño">
+          <Section title="Tamaño *">
             <SegmentedButtons
               value={size}
               onValueChange={v => setSize(v as (typeof sizes)[number])}
@@ -802,7 +793,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
           </Section>
 
           {/* Sexo */}
-          <Section title="Sexo">
+          <Section title="Sexo *">
             <SegmentedButtons
               value={sex}
               onValueChange={v => setSex(v as (typeof sexes)[number])}
@@ -816,7 +807,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
           </Section>
 
           {/* Edad */}
-          <Section title="Edad">
+          <Section title="Edad *">
             <View style={styles.switchRow}>
               <Text>Desconocida</Text>
               <Switch value={ageUnknown} onValueChange={setAgeUnknown} />
@@ -851,7 +842,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
           </Section>
 
           {/* Raza */}
-          <Section title="Raza">
+          <Section title="Raza * si no es mixto">
             <SelectInput
               label={loadingBreeds ? 'Cargando razas…' : 'Raza'}
               value={breedCode}
@@ -861,7 +852,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
           </Section>
 
           {/* Historia (OBLIGATORIA) */}
-          <Section title="Historia">
+          <Section title="Historia *">
             <TextInput
               mode="outlined"
               multiline
@@ -886,29 +877,45 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
             )}
           </Section>
 
-          {/* ¿Cómo es? */}
-          <Section title="¿Cómo es?">
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.hChips}
+          {/* ¿Cómo es? (tags) */}
+          <Section title="¿Cómo es? (etiquetas) *">
+            <View
+              style={[
+                tags.length === 0 && styles.requiredWrap,
+                { borderRadius: 12 },
+              ]}
             >
-              {tagOptions.map(t => (
-                <Chip
-                  key={t}
-                  selected={tags.includes(t)}
-                  onPress={() => toggleTag(t)}
-                  style={styles.chip}
-                >
-                  {t}
-                </Chip>
-              ))}
-            </ScrollView>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={[styles.hChips, { padding: 4 }]}
+              >
+                {tagOptions.map(t => (
+                  <Chip
+                    key={t}
+                    selected={tags.includes(t)}
+                    onPress={() => toggleTag(t)}
+                    style={styles.chip}
+                  >
+                    {t}
+                  </Chip>
+                ))}
+              </ScrollView>
+            </View>
+            {tags.length === 0 ? (
+              <HelperText type="error" visible>
+                Selecciona al menos una etiqueta.
+              </HelperText>
+            ) : (
+              <Text variant="bodySmall" style={styles.helperNote}>
+                Estas etiquetas se usarán en filtros y búsquedas.
+              </Text>
+            )}
           </Section>
 
           {/* Ubicación ——— justo DESPUÉS de “¿Cómo es?” */}
           <LocationPicker
-            headTitle="Ubicación (obligatoria)"
+            headTitle="Ubicación *"
             value={geo}
             onChange={(v: CoordChange) => {
               if (v.lat === 0 && v.lng === 0) {
@@ -934,7 +941,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
             </HelperText>
           ) : null}
 
-          {/* Dirección derivada (CARD sin overflow: hidden) */}
+          {/* Dirección derivada */}
           {derivedAddress ? (
             <Card
               mode="contained"
@@ -955,8 +962,14 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
           ) : null}
 
           {/* Fotos */}
-          <Section title="Fotos">
-            <View style={styles.mediaRow}>
+          <Section title="Fotos *">
+            <View
+              style={[
+                styles.mediaRow,
+                !hasAnyPhoto && styles.requiredWrap,
+                { padding: 8, borderRadius: 12 },
+              ]}
+            >
               <Button
                 mode="outlined"
                 onPress={pickImages}
@@ -984,11 +997,15 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
               ) : null}
             </View>
 
-            {/* Aviso portada: línea completa + wrap natural */}
             <Text variant="bodySmall" style={styles.infoText}>
               La primera foto que elijas se usará como{' '}
               <Text style={{ fontWeight: '600' }}>portada</Text>.
             </Text>
+            {!hasAnyPhoto ? (
+              <HelperText type="error" visible>
+                Agrega al menos una foto (puede ser portada o de la galería).
+              </HelperText>
+            ) : null}
 
             {gallery.length > 0 ? (
               <View style={styles.galleryPreview}>
@@ -1150,29 +1167,6 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
         </Dialog>
       </Portal>
 
-      {/* Visor sencillo */}
-      {/* <Portal>
-        <Dialog
-          visible={viewer.visible}
-          onDismiss={() => setViewer({ visible: false })}
-          style={{ maxWidth: 680, alignSelf: 'center' }}
-        >
-          <Dialog.Content>
-            {viewer.uri ? (
-              <Image
-                source={{ uri: viewer.uri }}
-                style={styles.viewerImage}
-                resizeMode="contain"
-              />
-            ) : null}
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => setViewer({ visible: false })}>
-              Cerrar
-            </Button>
-          </Dialog.Actions>
-        </Dialog>
-      </Portal> */}
       {/* Visor de imagen (fullscreen, proporciones correctas) */}
       <Modal
         visible={viewer.visible}
@@ -1265,6 +1259,14 @@ const styles = StyleSheet.create({
     opacity: 0.7,
     alignSelf: 'flex-start',
     lineHeight: 18,
+  },
+
+  // Envoltura requerida (borde punteado rojo)
+  requiredWrap: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#d32f2f',
+    backgroundColor: 'rgba(211,47,47,0.06)',
   },
 
   // ——— Portada

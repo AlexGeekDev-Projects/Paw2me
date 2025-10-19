@@ -18,6 +18,7 @@ module.exports = {
         '@assets': './src/assets',
         '@native': './src/native',
         '@config': './src/config',
+        '@reactions': './src/reactions',
       },
     }],
   ],

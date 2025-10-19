@@ -1,4 +1,3 @@
-// src/screens/Explore/ExploreScreen.tsx
 import React, {
   useCallback,
   useEffect,
@@ -12,6 +11,8 @@ import {
   View,
   StyleSheet,
   Image,
+  ScrollView,
+  Animated,
 } from 'react-native';
 import type { ListRenderItem } from 'react-native';
 import {
@@ -22,7 +23,7 @@ import {
   ActivityIndicator,
 } from 'react-native-paper';
 import AnimalCard from '@components/AnimalCard';
-import type { AnimalCardVM } from '@models/animal';
+import type { AnimalCardVM, Species } from '@models/animal';
 import { listAnimalsPublic } from '@services/animalsService';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -32,16 +33,67 @@ import Screen from '@components/layout/Screen';
 import ExploreTopBar from '@components/explore/ExploreTopBar';
 import FiltersModal from '@components/explore/FiltersModal';
 import { useExploreFiltersStore } from '@store/useExploreFiltersStore';
+import { useUserLocation } from '@hooks/useUserLocation';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const emptyPaw = require('@assets/empty-paw.png') as number;
 
 const PAGE_SIZE = 24;
+const LOAD_MORE_COOLDOWN_MS = 900;
+
+const STAGGER_MAX_ITEMS = 12;
+const STAGGER_STEP_MS = 55;
+const STAGGER_DURATION_MS = 220;
+
 type NavParamList = RootStackParamList & { AnimalDetail: { id: string } };
 type PublicAnimalsResponse = Readonly<{
   cards: AnimalCardVM[];
   nextCursor?: string | null;
 }>;
+
+const SPECIES_META: Array<{ key: Species; label: string; icon: string }> = [
+  { key: 'perro', label: 'Perros', icon: 'dog' },
+  { key: 'gato', label: 'Gatos', icon: 'cat' },
+  { key: 'conejo', label: 'Conejos', icon: 'rabbit' },
+  { key: 'ave', label: 'Aves', icon: 'bird' },
+  { key: 'reptil', label: 'Reptiles', icon: 'snake' },
+  { key: 'roedor', label: 'Roedores', icon: 'rodent' },
+  { key: 'cerdo_mini', label: 'Mini cerdo', icon: 'pig-variant' },
+  { key: 'caballo', label: 'Caballos', icon: 'horse' },
+  { key: 'otro', label: 'Otros', icon: 'paw' },
+];
+
+const AnimatedCardItem: React.FC<{
+  item: AnimalCardVM;
+  index: number;
+  onPress: (id: string) => void;
+}> = ({ item, index, onPress }) => {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(8)).current;
+
+  useEffect(() => {
+    const delay = Math.min(index, STAGGER_MAX_ITEMS) * STAGGER_STEP_MS;
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: STAGGER_DURATION_MS,
+        delay,
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: STAGGER_DURATION_MS,
+        delay,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [index, item.id, opacity, translateY]);
+
+  return (
+    <Animated.View style={{ opacity, transform: [{ translateY }] }}>
+      <AnimalCard data={item} onPress={onPress} />
+    </Animated.View>
+  );
+};
 
 const ExploreScreen: React.FC = () => {
   const [cards, setCards] = useState<AnimalCardVM[]>([]);
@@ -50,7 +102,7 @@ const ExploreScreen: React.FC = () => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [cursor, setCursor] = useState<string | null>(null);
-
+  const [bootstrapped, setBootstrapped] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [filtersVisible, setFiltersVisible] = useState(false);
 
@@ -58,30 +110,122 @@ const ExploreScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<NavParamList>>();
   const listRef = useRef<FlatList<AnimalCardVM>>(null);
 
-  const { filters, setText, toggleSpecies, toggleUrgent, buildParams } =
-    useExploreFiltersStore();
+  const {
+    filters,
+    setText,
+    toggleSpecies,
+    toggleUrgent,
+    buildParams,
+    clearAll,
+    clearDistance,
+    restoreFromLastApplied,
+  } = useExploreFiltersStore();
+
+  const { locating, error, locateMe, shouldSuggestSettings, openAppSettings } =
+    useUserLocation();
+
+  const hasCenter = useMemo(
+    () =>
+      Boolean(
+        filters.center && typeof (filters.center as any).lat === 'number',
+      ),
+    [filters.center],
+  );
+
+  const hasDistanceActive = useMemo(
+    () =>
+      typeof filters.distanceKm === 'number' &&
+      filters.distanceWasExplicit === true,
+    [filters.distanceKm, filters.distanceWasExplicit],
+  );
+  const hasCityActive = useMemo(
+    () => Boolean(filters.city) && filters.cityWasExplicit === true,
+    [filters.city, filters.cityWasExplicit],
+  );
+
+  const skipNextFiltersReloadRef = useRef(false);
+
+  const hasActiveFilters = useMemo(
+    () =>
+      Boolean(
+        filters.species ||
+          filters.size ||
+          hasCityActive ||
+          filters.urgent ||
+          filters.text ||
+          hasDistanceActive,
+      ),
+    [
+      filters.species,
+      filters.size,
+      hasCityActive,
+      filters.urgent,
+      filters.text,
+      hasDistanceActive,
+    ],
+  );
+
+  const activeFiltersCount = useMemo(() => {
+    let n = 0;
+    if (filters.species) n++;
+    if (filters.size) n++;
+    if (hasCityActive) n++;
+    if (filters.urgent) n++;
+    if (filters.text) n++;
+    if (hasDistanceActive) n++;
+    return n;
+  }, [
+    filters.species,
+    filters.size,
+    hasCityActive,
+    filters.urgent,
+    filters.text,
+    hasDistanceActive,
+  ]);
 
   const scrollToTop = useCallback(() => {
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
   }, []);
 
-  const fetchFirstPage = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = (await listAnimalsPublic({
-        limit: PAGE_SIZE,
-        ...buildParams(),
-      })) as PublicAnimalsResponse;
-      setCards(res.cards);
-      setCursor(res.nextCursor ?? null);
-      setHasMore(Boolean(res.nextCursor));
-    } finally {
-      setLoading(false);
-    }
-  }, [buildParams]);
+  const prefetchCoverImages = useCallback((items: AnimalCardVM[]) => {
+    const urls = items
+      .map(i => i.coverUrl)
+      .filter((u): u is string => typeof u === 'string' && u.length > 0);
+    urls.forEach(u => {
+      Image.prefetch(u).catch(() => {});
+    });
+  }, []);
+
+  const fetchFirstPage = useCallback(
+    async (override?: Parameters<typeof listAnimalsPublic>[0]) => {
+      setLoading(true);
+      try {
+        const res = (await listAnimalsPublic({
+          limit: PAGE_SIZE,
+          ...buildParams(),
+          ...(override ?? {}),
+        })) as PublicAnimalsResponse;
+
+        prefetchCoverImages(res.cards);
+        setCards(res.cards);
+        setCursor(res.nextCursor ?? null);
+        setHasMore(Boolean(res.nextCursor));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [buildParams, prefetchCoverImages],
+  );
+
+  const lastLoadMoreAtRef = useRef(0);
+  const endReachedDuringMomentum = useRef(false);
 
   const fetchNextPage = useCallback(async () => {
+    const now = Date.now();
     if (!hasMore || loadingMore) return;
+    if (now - lastLoadMoreAtRef.current < LOAD_MORE_COOLDOWN_MS) return;
+
+    lastLoadMoreAtRef.current = now;
     setLoadingMore(true);
     try {
       const res = (await listAnimalsPublic({
@@ -90,13 +234,20 @@ const ExploreScreen: React.FC = () => {
         ...buildParams(),
       })) as PublicAnimalsResponse;
 
+      prefetchCoverImages(res.cards);
       setCards(prev => prev.concat(res.cards));
       setCursor(res.nextCursor ?? null);
       setHasMore(Boolean(res.nextCursor));
     } finally {
       setLoadingMore(false);
     }
-  }, [cursor, hasMore, loadingMore, buildParams]);
+  }, [cursor, hasMore, loadingMore, buildParams, prefetchCoverImages]);
+
+  const handleEndReached = useCallback(() => {
+    if (endReachedDuringMomentum.current) return;
+    endReachedDuringMomentum.current = true;
+    void fetchNextPage();
+  }, [fetchNextPage]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -104,48 +255,82 @@ const ExploreScreen: React.FC = () => {
     setRefreshing(false);
   }, [fetchFirstPage]);
 
-  // Cargar inicial y recargar al cambiar filtros
   useEffect(() => {
-    void fetchFirstPage();
-  }, [fetchFirstPage]);
+    let alive = true;
+    (async () => {
+      try {
+        try {
+          await locateMe({ strategy: 'balanced' });
+        } catch {}
+        restoreFromLastApplied();
+        skipNextFiltersReloadRef.current = true;
+        await fetchFirstPage();
+      } finally {
+        if (alive) setBootstrapped(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
+    if (!bootstrapped) return;
+    if (skipNextFiltersReloadRef.current) {
+      skipNextFiltersReloadRef.current = false;
+      return;
+    }
     void (async () => {
       await fetchFirstPage();
       scrollToTop();
     })();
-  }, [filters, fetchFirstPage, scrollToTop]);
+  }, [filters, bootstrapped, fetchFirstPage, scrollToTop]);
 
-  // Header con título, icono de filtros (abre modal) y lupa (abre búsqueda)
-  const header = useMemo(
-    () => (
+  const distanceProps:
+    | { distanceKm: number; onClearDistance: () => void }
+    | {} = hasDistanceActive
+    ? { distanceKm: filters.distanceKm!, onClearDistance: clearDistance }
+    : {};
+
+  const header = useMemo(() => {
+    return (
       <View style={styles.headerWrap}>
         <ExploreTopBar
           searchOpen={searchOpen}
           onOpenSearch={() => setSearchOpen(true)}
           onCloseSearch={() => setSearchOpen(false)}
           query={filters.text ?? ''}
-          onChangeQuery={setText}
+          onCommitQuery={q => setText(q)}
           onOpenFilters={() => setFiltersVisible(true)}
+          onClearFilters={clearAll}
+          hasActiveFilters={hasActiveFilters}
+          activeFiltersCount={activeFiltersCount}
+          location={{ locating, hasCenter, ...(error ? { error } : {}) }}
+          onRetryLocate={() => {
+            void locateMe({ strategy: 'balanced' });
+          }}
+          suggestSettings={shouldSuggestSettings}
+          onOpenSettings={openAppSettings}
+          {...distanceProps}
         />
 
-        {/* Accesos rápidos (opcionales) */}
-        <View style={styles.chipsRow}>
-          <Chip
-            selected={filters.species === 'perro'}
-            onPress={() => toggleSpecies('perro')}
-            icon="dog"
-            style={styles.chip}
-          >
-            Perros
-          </Chip>
-          <Chip
-            selected={filters.species === 'gato'}
-            onPress={() => toggleSpecies('gato')}
-            icon="cat"
-            style={styles.chip}
-          >
-            Gatos
-          </Chip>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipsScroll}
+        >
+          {SPECIES_META.map(s => (
+            <Chip
+              key={s.key}
+              selected={filters.species === s.key}
+              onPress={() => toggleSpecies(s.key)}
+              icon={s.icon}
+              style={styles.chip}
+            >
+              {s.label}
+            </Chip>
+          ))}
           <Chip
             selected={Boolean(filters.urgent)}
             onPress={toggleUrgent}
@@ -154,28 +339,40 @@ const ExploreScreen: React.FC = () => {
           >
             Urgente
           </Chip>
-        </View>
+        </ScrollView>
       </View>
-    ),
-    [
-      filters.species,
-      filters.urgent,
-      filters.text,
-      searchOpen,
-      setText,
-      toggleSpecies,
-      toggleUrgent,
-    ],
+    );
+  }, [
+    searchOpen,
+    filters.text,
+    filters.species,
+    filters.urgent,
+    setText,
+    toggleSpecies,
+    toggleUrgent,
+    setFiltersVisible,
+    clearAll,
+    hasActiveFilters,
+    activeFiltersCount,
+    locating,
+    hasCenter,
+    error,
+    locateMe,
+    shouldSuggestSettings,
+    openAppSettings,
+    distanceProps,
+  ]);
+
+  const navigationPress = useCallback(
+    (id: string) => navigation.navigate('AnimalDetail', { id }),
+    [navigation],
   );
 
   const renderItem: ListRenderItem<AnimalCardVM> = useCallback(
-    ({ item }) => (
-      <AnimalCard
-        data={item}
-        onPress={id => navigation.navigate('AnimalDetail', { id })}
-      />
+    ({ item, index }) => (
+      <AnimatedCardItem item={item} index={index} onPress={navigationPress} />
     ),
-    [navigation],
+    [navigationPress],
   );
 
   return (
@@ -196,18 +393,26 @@ const ExploreScreen: React.FC = () => {
             resizeMode="contain"
           />
           <Text variant="titleMedium" style={styles.emptyText}>
-            Sin huellitas aún…
+            Sin huellitas por aquí…
           </Text>
           <Text variant="bodyMedium" style={styles.emptyHint}>
-            Prueba ajustar la búsqueda o los filtros.
+            Puede ser por los filtros. Restablécelos o ajusta la búsqueda.
           </Text>
-          <Button
-            mode="outlined"
-            style={styles.emptyButton}
-            onPress={() => navigation.navigate('CreateAnimal')}
-          >
-            Agregar huellita
-          </Button>
+          <View style={styles.emptyActions}>
+            <Button
+              mode="contained"
+              onPress={clearAll}
+              style={{ marginRight: 8 }}
+            >
+              Limpiar filtros
+            </Button>
+            <Button
+              mode="outlined"
+              onPress={() => navigation.navigate('CreateAnimal')}
+            >
+              Agregar huellita
+            </Button>
+          </View>
         </View>
       ) : (
         <FlatList
@@ -230,8 +435,11 @@ const ExploreScreen: React.FC = () => {
               tintColor={theme.colors.primary}
             />
           }
-          onEndReached={fetchNextPage}
-          onEndReachedThreshold={0.4}
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.6}
+          onMomentumScrollBegin={() => {
+            endReachedDuringMomentum.current = false;
+          }}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{
             paddingTop: 12,
@@ -239,8 +447,9 @@ const ExploreScreen: React.FC = () => {
             paddingBottom: 96,
           }}
           removeClippedSubviews
-          windowSize={7}
-          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          updateCellsBatchingPeriod={50}
+          initialNumToRender={10}
           contentInsetAdjustmentBehavior="automatic"
         />
       )}
@@ -250,8 +459,8 @@ const ExploreScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   headerWrap: { gap: 8, marginBottom: 8 },
-  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {},
+  chipsScroll: { paddingVertical: 4, paddingRight: 8, alignItems: 'center' },
+  chip: { marginRight: 8 },
   emptyContainer: {
     flex: 1,
     padding: 32,
@@ -266,7 +475,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   emptyImage: { width: 96, height: 96, opacity: 0.3, marginBottom: 16 },
-  emptyButton: { marginTop: 4 },
+  emptyActions: { flexDirection: 'row' },
   footer: { paddingVertical: 16 },
 });
 
