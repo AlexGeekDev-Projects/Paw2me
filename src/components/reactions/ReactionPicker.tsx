@@ -11,8 +11,8 @@ import {
   Animated,
   useWindowDimensions,
   Pressable,
+  type LayoutChangeEvent,
 } from 'react-native';
-import type { LayoutChangeEvent } from 'react-native';
 import { Portal, useTheme } from 'react-native-paper';
 import LottieView from 'lottie-react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -35,6 +35,10 @@ type Props = Readonly<{
   anchor?: PickerAnchor;
   /** Subconjunto a mostrar (opcional). */
   availableKeys?: ReactionKey[];
+  /** X absoluto (ventana) para controlar el hover desde el padre (Pan tras long-press). */
+  hoverX?: number | null;
+  /** Callback opcional para informar qué key está activa por hover. */
+  onHoverKeyChange?: (k: ReactionKey | null) => void;
 }>;
 
 const BASE_ITEM = 36;
@@ -52,6 +56,8 @@ const ReactionPicker: React.FC<Props> = ({
   initial = null,
   anchor,
   availableKeys,
+  hoverX = null,
+  onHoverKeyChange,
 }) => {
   const theme = useTheme();
   const { width: winW, height: winH } = useWindowDimensions();
@@ -94,7 +100,7 @@ const ReactionPicker: React.FC<Props> = ({
 
   // tamaño/anchura del tray
   const sizes = useMemo(() => {
-    const n = Math.max(1, RX.length); // evita dividir por 0
+    const n = Math.max(1, RX.length);
     const maxAvail = Math.max(280, winW - 24 * 2);
     const step = Math.floor((maxAvail - PAD_H * 2 - GAP * (n - 1)) / n);
     const itemSize = Math.max(MIN_ITEM, Math.min(BASE_ITEM, step));
@@ -176,19 +182,19 @@ const ReactionPicker: React.FC<Props> = ({
         if (prev === next) return prev;
         if (prev >= 0) animateIdx(prev, false);
         if (next >= 0 && next < RX.length) animateIdx(next, true);
+        const k = next >= 0 && next < RX.length ? RX[next]!.key : null;
+        if (onHoverKeyChange) onHoverKeyChange(k);
         return next;
       });
     },
-    [RX.length, animateIdx],
+    [RX, animateIdx, onHoverKeyChange],
   );
 
   // Convertir pageX a índice local del tray
   const getIndexFromAbsoluteX = useCallback(
     (absoluteX: number): number => {
       const xLocal = absoluteX - position.left;
-
       const step = sizes.itemSize + GAP;
-      // posición relativa al centro del primer ítem
       const rel = xLocal - PAD_H - sizes.itemSize / 2;
 
       let idx = Math.round(rel / step);
@@ -201,15 +207,18 @@ const ReactionPicker: React.FC<Props> = ({
     [position.left, sizes.itemSize, RX.length],
   );
 
-  // Gestos
+  // *** Control externo del hover (desde el Pan del botón) ***
+  useEffect(() => {
+    if (!visible) return;
+    if (typeof hoverX !== 'number') return;
+    setActiveIndex(getIndexFromAbsoluteX(hoverX));
+  }, [getIndexFromAbsoluteX, hoverX, setActiveIndex, visible]);
+
+  // Pan interno (fallback: tocar dentro del tray)
   const pan = useMemo(() => {
     return Gesture.Pan()
-      .onBegin(e => {
-        setActiveIndex(getIndexFromAbsoluteX(e.absoluteX));
-      })
-      .onChange(e => {
-        setActiveIndex(getIndexFromAbsoluteX(e.absoluteX));
-      })
+      .onBegin(e => setActiveIndex(getIndexFromAbsoluteX(e.absoluteX)))
+      .onChange(e => setActiveIndex(getIndexFromAbsoluteX(e.absoluteX)))
       .onEnd(() => {
         const key = hoverIndex >= 0 ? (RX[hoverIndex]?.key ?? null) : null;
         onPick(key);
@@ -269,8 +278,11 @@ const ReactionPicker: React.FC<Props> = ({
                         width: sizes.itemSize,
                         height: sizes.itemSize,
                         marginRight: i < RX.length - 1 ? GAP : 0,
-                        // RN types + exactOptionalPropertyTypes: castear transform
-                        transform: [{ scale: s }, { translateY: y }] as any,
+                        // RN types + exactOptionalPropertyTypes: cast controlado
+                        transform: [
+                          { scale: s },
+                          { translateY: y },
+                        ] as unknown as any,
                       },
                     ]}
                   >
