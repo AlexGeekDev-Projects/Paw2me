@@ -5,8 +5,9 @@ import LottieView from 'lottie-react-native';
 import ReactionPicker, { type PickerAnchor } from './ReactionPicker';
 import { REACTIONS, pickReactions } from '@reactions/assets';
 import type { ReactionCounts, ReactionKey } from '@reactions/types';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
-type Props = Readonly<{
+export type ReactionFooterProps = Readonly<{
   id: string;
   current?: ReactionKey | null;
   counts?: ReactionCounts;
@@ -19,6 +20,7 @@ type Props = Readonly<{
 }>;
 
 const PRIMARY: ReactionKey = 'like';
+const LONG_MS = 280;
 
 const ReactionSummary: React.FC<
   Readonly<{ counts: Required<ReactionCounts>; availableKeys?: ReactionKey[] }>
@@ -67,7 +69,7 @@ const ReactionSummary: React.FC<
   );
 };
 
-const ReactionFooter: React.FC<Props> = ({
+const ReactionFooter: React.FC<ReactionFooterProps> = ({
   id,
   current = null,
   counts,
@@ -84,6 +86,8 @@ const ReactionFooter: React.FC<Props> = ({
   const [pickerAnchor, setPickerAnchor] = useState<PickerAnchor | undefined>(
     undefined,
   );
+  const [hoverX, setHoverX] = useState<number | null>(null);
+  const hoverKeyRef = useRef<ReactionKey | null>(null);
   const [animKey, setAnimKey] = useState(0);
   const RX = useMemo(() => pickReactions(availableKeys), [availableKeys]);
 
@@ -107,6 +111,8 @@ const ReactionFooter: React.FC<Props> = ({
     (currentLocal && REACTIONS.find(r => r.key === currentLocal)) ||
     REACTIONS.find(r => r.key === PRIMARY)!;
 
+  const weight: TextStyle['fontWeight'] = currentLocal ? '700' : '500';
+
   const quickLike = useCallback((): void => {
     const next = currentLocal === PRIMARY ? null : PRIMARY;
     setCurrentLocal(next);
@@ -114,7 +120,7 @@ const ReactionFooter: React.FC<Props> = ({
     onReact?.(id, PRIMARY, Boolean(next));
   }, [currentLocal, id, onReact]);
 
-  const openPickerAnchored = useCallback((): void => {
+  const measureAnchor = useCallback(() => {
     const view = likeAnchorRef.current as unknown as {
       measureInWindow?: (
         cb: (x: number, y: number, w: number, h: number) => void,
@@ -123,31 +129,72 @@ const ReactionFooter: React.FC<Props> = ({
     if (view?.measureInWindow) {
       view.measureInWindow((x, y, w, h) => {
         setPickerAnchor({ x, y, width: w, height: h });
-        setPickerOpen(true);
       });
     } else {
       setPickerAnchor(undefined);
-      setPickerOpen(true);
     }
   }, []);
 
-  const handlePick = useCallback(
-    (r: ReactionKey | null): void => {
-      if (!r) return;
-      setCurrentLocal(r);
-      setAnimKey(k => k + 1);
-      onReact?.(id, r, true);
-    },
-    [id, onReact],
+  const openPicker = useCallback(() => {
+    measureAnchor();
+    setPickerOpen(true);
+  }, [measureAnchor]);
+
+  const closePicker = useCallback(() => {
+    setPickerOpen(false);
+    setHoverX(null);
+    hoverKeyRef.current = null;
+  }, []);
+
+  // Gestos: Tap rápido vs Pan activado por long-press
+  const tap = useMemo(
+    () =>
+      Gesture.Tap()
+        .maxDuration(180)
+        .onEnd((_e, success) => {
+          if (success) quickLike();
+        })
+        .runOnJS(true),
+    [quickLike],
   );
 
-  // fontWeight tipado sin "as const" en ternario
-  const weight: TextStyle['fontWeight'] = currentLocal ? '700' : '500';
+  const pan = useMemo(() => {
+    let active = false;
+    return Gesture.Pan()
+      .activateAfterLongPress(LONG_MS)
+      .shouldCancelWhenOutside(false)
+      .activeOffsetX([-2, 2])
+      .failOffsetY([-8, 8])
+      .cancelsTouchesInView(true)
+      .onStart(e => {
+        active = true;
+        openPicker();
+        setHoverX(e.absoluteX);
+      })
+      .onChange(e => {
+        if (active) setHoverX(e.absoluteX);
+      })
+      .onEnd(() => {
+        active = false;
+        const k = hoverKeyRef.current;
+        if (k) {
+          setCurrentLocal(k);
+          setAnimKey(v => v + 1);
+          onReact?.(id, k, true);
+        }
+        closePicker();
+      })
+      .onFinalize(() => {
+        active = false;
+      })
+      .runOnJS(true);
+  }, [closePicker, id, onReact, openPicker]);
+
+  const combo = useMemo(() => Gesture.Race(tap, pan), [pan, tap]);
 
   return (
     <View style={styles.wrap}>
       <View style={styles.topRow}>
-        {/* pasar availableKeys solo si existe (exactOptionalPropertyTypes) */}
         <ReactionSummary
           counts={countsLocal}
           {...(availableKeys ? ({ availableKeys } as const) : {})}
@@ -160,13 +207,8 @@ const ReactionFooter: React.FC<Props> = ({
       </View>
 
       <View style={styles.actionsRow}>
-        <View ref={likeAnchorRef} collapsable={false}>
-          <Pressable
-            style={styles.btn}
-            android_ripple={{ color: theme.colors.primary, borderless: true }}
-            onPress={quickLike}
-            onLongPress={openPickerAnchored}
-          >
+        <GestureDetector gesture={combo}>
+          <View ref={likeAnchorRef} collapsable={false} style={styles.btn}>
             <LottieView
               key={animKey}
               source={currentMeta.lottie}
@@ -187,8 +229,8 @@ const ReactionFooter: React.FC<Props> = ({
                 ? REACTIONS.find(r => r.key === currentLocal)?.label
                 : 'Me gusta'}
             </Text>
-          </Pressable>
-        </View>
+          </View>
+        </GestureDetector>
 
         <Pressable style={styles.btn} onPress={() => onCommentPress?.(id)}>
           <Text variant="labelLarge" style={styles.muted}>
@@ -206,12 +248,16 @@ const ReactionFooter: React.FC<Props> = ({
       <ReactionPicker
         visible={pickerOpen}
         initial={currentLocal}
-        onPick={handlePick}
-        onRequestClose={() => setPickerOpen(false)}
-        // pasar anchor solo si existe (exactOptionalPropertyTypes)
+        onPick={() => {
+          /* pick final se confirma en onEnd del Pan padre */
+        }}
+        onRequestClose={closePicker}
         {...(pickerAnchor ? ({ anchor: pickerAnchor } as const) : {})}
-        // Aquí podemos pasarlo siempre: es un array concreto, no undefined
         availableKeys={RX.map(r => r.key)}
+        hoverX={hoverX}
+        onHoverKeyChange={k => {
+          hoverKeyRef.current = k;
+        }}
       />
     </View>
   );
