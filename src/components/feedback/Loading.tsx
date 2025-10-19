@@ -1,12 +1,15 @@
-// src/components/feedback/Loading.tsx
 import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Animated } from 'react-native';
 import { Text, useTheme, Card, ProgressBar } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+
+// usa el componente separado y re-exporta para compatibilidad
+import PawIconAnimated from './PawIconAnimated';
+export { default as PawIconAnimated } from './PawIconAnimated';
+export type { PawIconAnimatedProps } from './PawIconAnimated';
 
 type LoadingVariant = 'fullscreen' | 'inline' | 'skeleton-card-list';
 
-// 👇 Tipo correcto para width en Animated.View
+// Tipo correcto para width en Animated.View
 type WidthSpec = number | `${number}%` | 'auto';
 
 interface BaseProps {
@@ -55,7 +58,7 @@ const SkeletonLine: React.FC<{
   return (
     <Animated.View
       style={{
-        width, // ✅ WidthSpec (no string genérico)
+        width,
         height,
         borderRadius: radius,
         backgroundColor: '#E6E6E6',
@@ -75,57 +78,10 @@ const SkeletonAnimalCard: React.FC = () => {
         <View style={styles.skelChipsRow}>
           <SkeletonLine width={70} height={22} radius={12} />
           <SkeletonLine width={60} height={22} radius={12} />
-          {/* ejemplo con porcentaje tipado */}
           <SkeletonLine width={'30%'} height={22} radius={12} />
         </View>
       </Card.Content>
     </Card>
-  );
-};
-
-const PawIconAnimated: React.FC = () => {
-  const spin = useRef(new Animated.Value(0)).current;
-  const bob = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const spinLoop = Animated.loop(
-      Animated.timing(spin, {
-        toValue: 1,
-        duration: 2200,
-        useNativeDriver: true,
-      }),
-    );
-    const bobLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(bob, {
-          toValue: -6,
-          duration: 700,
-          useNativeDriver: true,
-        }),
-        Animated.timing(bob, {
-          toValue: 0,
-          duration: 700,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    spinLoop.start();
-    bobLoop.start();
-    return () => {
-      spinLoop.stop();
-      bobLoop.stop();
-    };
-  }, [spin, bob]);
-
-  const rotate = spin.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
-
-  return (
-    <Animated.View style={{ transform: [{ translateY: bob }, { rotate }] }}>
-      <Icon name="paw" size={56} />
-    </Animated.View>
   );
 };
 

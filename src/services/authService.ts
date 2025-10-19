@@ -1,9 +1,11 @@
+// src/services/authService.ts
 import {
   getAuth,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
   signOut,
+  onAuthStateChanged,
   type FirebaseAuthTypes,
 } from '@react-native-firebase/auth';
 import {
@@ -20,18 +22,30 @@ export interface UserDoc {
   uid: string;
   email: string;
   displayName: string;
-  photoURL?: string | undefined;
   role: Role;
-  age?: number | undefined;
-  bio?: string | undefined;
-  phone?: string | undefined;
-  website?: string | undefined;
-  location?:
-    | { country?: string | undefined; city?: string | undefined }
-    | undefined;
 
-  createdAt?: FirebaseFirestoreTypes.FieldValue | number | null | undefined;
-  updatedAt?: FirebaseFirestoreTypes.FieldValue | number | null | undefined;
+  fullName?: string;
+  username?: string;
+  bio?: string;
+  age?: number;
+  gender?: 'male' | 'female' | 'other';
+  phone?: string;
+  website?: string;
+  location?: {
+    country?: string;
+    city?: string;
+    address?: string;
+    lat?: number;
+    lng?: number;
+  };
+  shelterName?: string;
+  shelterVerified?: boolean;
+  shelterDescription?: string;
+  verifiedEmail: boolean;
+  acceptedTerms?: boolean;
+  receiveNotifications?: boolean;
+  createdAt?: FirebaseFirestoreTypes.FieldValue;
+  updatedAt?: FirebaseFirestoreTypes.FieldValue;
 }
 
 const makeDefaultUser = (
@@ -40,33 +54,53 @@ const makeDefaultUser = (
   uid: u.uid,
   email: u.email ?? '',
   displayName: u.displayName ?? '',
-  photoURL: u.photoURL ?? undefined,
   role: 'user',
-  age: undefined,
+  verifiedEmail: !!u.emailVerified,
+  fullName: '',
+  username: '',
   bio: '',
-  phone: '',
-  website: '',
-  location: {},
+  receiveNotifications: true,
 });
 
-export const ensureUserDoc = async (u: FirebaseAuthTypes.User) => {
-  const db = getFirestore();
-  const ref = doc(db, 'users', u.uid);
-  await setDoc(
-    ref,
-    {
-      ...makeDefaultUser(u),
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    } as Partial<UserDoc>,
-    { merge: true },
-  );
-};
-
-export const signUpEmail = async (email: string, password: string) => {
+export const signUpEmail = async (
+  email: string,
+  password: string,
+  fullName?: string,
+  username?: string,
+) => {
   const auth = getAuth();
   const creds = await createUserWithEmailAndPassword(auth, email, password);
-  await ensureUserDoc(creds.user);
+
+  // 🔒 Espera a que la sesión esté propagada antes de escribir
+  await new Promise<FirebaseAuthTypes.User>((resolve, reject) => {
+    const unsub = onAuthStateChanged(auth, user => {
+      if (user?.uid === creds.user.uid) {
+        unsub();
+        resolve(user);
+      }
+    });
+    // Optional: fallback timeout
+    setTimeout(
+      () => reject(new Error('Timeout esperando autenticación')),
+      3000,
+    );
+  });
+
+  const userDoc: Omit<UserDoc, 'createdAt' | 'updatedAt'> = {
+    ...makeDefaultUser(creds.user),
+    fullName: fullName ?? '',
+    username: username ?? '',
+  };
+
+  const db = getFirestore();
+  const ref = doc(db, 'users', creds.user.uid);
+
+  await setDoc(ref, {
+    ...userDoc,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  } satisfies UserDoc);
+
   return creds.user;
 };
 
@@ -78,4 +112,5 @@ export const signInEmail = async (email: string, password: string) => {
 
 export const resetPassword = async (email: string) =>
   sendPasswordResetEmail(getAuth(), email);
+
 export const signOutSession = async () => signOut(getAuth());

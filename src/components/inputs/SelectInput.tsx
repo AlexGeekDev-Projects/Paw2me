@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
+import { Pressable, View, StyleSheet } from 'react-native';
 import { TextInput, HelperText } from 'react-native-paper';
 import SelectDialog, { type Option } from './SelectDialog';
 
 interface Props {
   label: string;
-  value?: string; // puede estar indefinido
+  value?: string;
   onChange: (value: string) => void;
   options: readonly Option[];
   errorText?: string;
@@ -19,29 +20,38 @@ const SelectInput: React.FC<Props> = ({
   errorText,
   placeholder,
 }) => {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<boolean>(false);
 
-  const displayLabel = useMemo(() => {
+  const selectedLabel = useMemo<string>(() => {
+    if (!value) return '';
     const found = options.find(o => o.value === value);
     return found?.label ?? '';
-  }, [options, value]);
+  }, [value, options]);
 
-  // Para exactOptionalPropertyTypes: solo pasamos placeholder si existe
-  const inputOptional = placeholder ? { placeholder } : {};
+  const showValue = selectedLabel || placeholder || '';
 
   return (
     <>
-      <TextInput
-        mode="outlined"
-        dense
-        label={label}
-        value={displayLabel}
-        right={<TextInput.Icon icon="menu-down" />}
-        onFocus={() => setOpen(true)}
-        onPressIn={() => setOpen(true)}
-        editable={false}
-        {...inputOptional}
-      />
+      {/* Capturamos toques sobre TODO el campo */}
+      <Pressable onPress={() => setOpen(true)}>
+        <View pointerEvents="none">
+          <TextInput
+            mode="outlined"
+            label={label}
+            value={showValue}
+            editable={false}
+            right={
+              <TextInput.Icon
+                icon="chevron-down"
+                // Muy importante: sin esto, el icono intenta enfocar el input
+                forceTextInputFocus={false}
+                onPress={() => setOpen(true)}
+              />
+            }
+          />
+        </View>
+      </Pressable>
+
       {errorText ? (
         <HelperText type="error" visible>
           {errorText}
@@ -52,7 +62,7 @@ const SelectInput: React.FC<Props> = ({
         visible={open}
         onDismiss={() => setOpen(false)}
         title={label}
-        value={value} // puede ser undefined (válido)
+        value={value}
         options={options}
         onSelect={v => onChange(v)}
       />

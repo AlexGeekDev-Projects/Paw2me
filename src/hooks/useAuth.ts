@@ -1,7 +1,9 @@
+// src/hooks/useAuth.ts
 import { useEffect, useState } from 'react';
 import {
   getAuth,
   onAuthStateChanged,
+  signOut as firebaseSignOut,
   type FirebaseAuthTypes,
 } from '@react-native-firebase/auth';
 
@@ -9,10 +11,11 @@ interface AuthState {
   ready: boolean;
   isSignedIn: boolean;
   user: FirebaseAuthTypes.User | null;
+  signOut: () => Promise<void>;
 }
 
 export const useAuth = (): AuthState => {
-  const [state, setState] = useState<AuthState>({
+  const [state, setState] = useState<Omit<AuthState, 'signOut'>>({
     ready: false,
     isSignedIn: false,
     user: null,
@@ -25,5 +28,10 @@ export const useAuth = (): AuthState => {
     return unsub;
   }, []);
 
-  return state;
+  const signOut = async () => {
+    await firebaseSignOut(getAuth());
+    setState({ ready: true, isSignedIn: false, user: null });
+  };
+
+  return { ...state, signOut };
 };

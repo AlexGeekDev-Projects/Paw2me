@@ -11,6 +11,7 @@ import {
   List,
   Chip,
   Text,
+  useTheme,
 } from 'react-native-paper';
 import {
   launchImageLibrary,
@@ -23,6 +24,7 @@ import { getAuth } from '@services/firebase';
 import { listMyAnimals, type MyAnimalItem } from '@services/animalsService';
 import { createPost, putPostImage } from '@services/postsService';
 import Loading from '@components/feedback/Loading';
+import Screen from '@components/layout/Screen';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreatePost'>;
 
@@ -49,6 +51,8 @@ const CreatePostScreen: React.FC<Props> = ({ navigation, route }) => {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [progress, setProgress] = useState<number>(0);
   const [dialogOpen, setDialogOpen] = useState<boolean>(false);
+
+  const theme = useTheme();
 
   useEffect(() => {
     (async () => {
@@ -116,80 +120,70 @@ const CreatePostScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [errors.length, animal, uid, content, gallery, navigation]);
 
   return (
-    <>
-      <Appbar.Header>
-        <Appbar.BackAction onPress={() => navigation.goBack()} />
-        <Appbar.Content title="Nueva actualización" />
-      </Appbar.Header>
-
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={{ padding: 12 }}
-      >
-        <Text variant="labelMedium" style={{ marginBottom: 6 }}>
-          Animal
-        </Text>
-        <View style={styles.row}>
-          {animal ? (
-            <Chip
-              mode="outlined"
-              onClose={() => setAnimal(null)}
-              onPress={() => setDialogOpen(true)}
-            >
-              {animal.name}
-            </Chip>
-          ) : (
-            <Button mode="outlined" onPress={() => setDialogOpen(true)}>
-              Seleccionar…
-            </Button>
-          )}
-        </View>
-
-        <TextInput
-          label="¿Qué está pasando?"
-          value={content}
-          onChangeText={setContent}
-          multiline
-          style={styles.input}
-        />
-
-        <View style={styles.mediaRow}>
-          <Button mode="outlined" onPress={openPicker}>
-            Añadir fotos…
+    <Screen scrollable>
+      <Text variant="labelMedium" style={{ marginBottom: 6 }}>
+        Animal
+      </Text>
+      <View style={styles.row}>
+        {animal ? (
+          <Chip
+            mode="outlined"
+            onClose={() => setAnimal(null)}
+            onPress={() => setDialogOpen(true)}
+          >
+            {animal.name}
+          </Chip>
+        ) : (
+          <Button mode="outlined" onPress={() => setDialogOpen(true)}>
+            Seleccionar…
           </Button>
-          <View style={styles.previewRow}>
-            {gallery
-              .slice(0, 4)
-              .map((a: Asset, i: number) =>
-                hasUri(a) ? (
-                  <Image
-                    key={`${i}-${a.uri}`}
-                    source={{ uri: a.uri }}
-                    style={styles.thumb}
-                  />
-                ) : null,
-              )}
-            {gallery.length > 4 ? (
-              <Text variant="bodySmall">+{gallery.length - 4}</Text>
-            ) : null}
-          </View>
-        </View>
+        )}
+      </View>
 
-        {errors.length > 0 ? (
-          <HelperText type="error" visible>
-            {errors.join('  •  ')}
-          </HelperText>
-        ) : null}
+      <TextInput
+        label="¿Qué está pasando?"
+        value={content}
+        onChangeText={setContent}
+        multiline
+        style={styles.input}
+      />
 
-        <Button
-          mode="contained"
-          onPress={onSubmit}
-          disabled={submitting || errors.length > 0}
-          style={{ marginVertical: 12 }}
-        >
-          Publicar
+      <View style={styles.mediaRow}>
+        <Button mode="outlined" onPress={openPicker}>
+          Añadir fotos…
         </Button>
-      </ScrollView>
+        <View style={styles.previewRow}>
+          {gallery
+            .slice(0, 4)
+            .map((a: Asset, i: number) =>
+              hasUri(a) ? (
+                <Image
+                  key={`${i}-${a.uri}`}
+                  source={{ uri: a.uri }}
+                  style={styles.thumb}
+                />
+              ) : null,
+            )}
+          {gallery.length > 4 ? (
+            <Text variant="bodySmall">+{gallery.length - 4}</Text>
+          ) : null}
+        </View>
+      </View>
+
+      {errors.length > 0 ? (
+        <HelperText type="error" visible>
+          {errors.join('  •  ')}
+        </HelperText>
+      ) : null}
+
+      <Button
+        mode="contained"
+        onPress={onSubmit}
+        disabled={submitting || errors.length > 0}
+        style={{ marginVertical: 12 }}
+      >
+        Publicar
+      </Button>
 
       <Portal>
         <Dialog visible={dialogOpen} onDismiss={() => setDialogOpen(false)}>
@@ -226,7 +220,7 @@ const CreatePostScreen: React.FC<Props> = ({ navigation, route }) => {
           message="Publicando…"
         />
       ) : null}
-    </>
+    </Screen>
   );
 };
 
