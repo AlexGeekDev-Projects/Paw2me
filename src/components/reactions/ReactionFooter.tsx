@@ -1,5 +1,12 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  useEffect,
+} from 'react';
 import { View, StyleSheet, Pressable, type TextStyle } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text, useTheme } from 'react-native-paper';
 import LottieView from 'lottie-react-native';
 import ReactionPicker, { type PickerAnchor } from './ReactionPicker';
@@ -22,6 +29,18 @@ export type ReactionFooterProps = Readonly<{
 const PRIMARY: ReactionKey = 'like';
 const LONG_MS = 280;
 
+/** Misma normalización visual que el picker, aplicada a resumen y botón */
+const NORMALIZE_SCALE: Readonly<Partial<Record<ReactionKey, number>>> = {
+  like: 1.7,
+  love: 1.6,
+  happy: 0.95,
+  wow: 0.95,
+  sad: 0.75,
+  angry: 0.7,
+  match: 1.45,
+};
+
+/** Burbujas + total (estilo FB), normalizadas */
 const ReactionSummary: React.FC<
   Readonly<{ counts: Required<ReactionCounts>; availableKeys?: ReactionKey[] }>
 > = ({ counts, availableKeys }) => {
@@ -44,19 +63,30 @@ const ReactionSummary: React.FC<
 
   return (
     <View style={styles.summaryWrap}>
-      <View style={styles.bubbles}>
+      <View
+        style={[
+          styles.bubbles,
+          { width: top.length > 0 ? 16 + (top.length - 1) * 12 : 0 },
+        ]}
+        pointerEvents="none"
+      >
         {top.map((k, i) => {
           const meta = REACTIONS.find(r => r.key === k)!;
+          const sc = NORMALIZE_SCALE[k] ?? 1;
           return (
             <View
               key={k}
-              style={[styles.bubble, { left: i * 14, zIndex: 10 - i }]}
+              style={[styles.bubble, { left: i * 12, zIndex: 10 - i }]}
             >
               <LottieView
                 source={meta.lottie}
                 autoPlay
                 loop
-                style={{ width: 18, height: 18 }}
+                style={{
+                  width: 16,
+                  height: 16,
+                  transform: [{ scale: sc }],
+                }}
               />
             </View>
           );
@@ -81,19 +111,80 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
   availableKeys,
 }) => {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
+
+  // Reacción local (optimista) y del servidor
   const [currentLocal, setCurrentLocal] = useState<ReactionKey | null>(current);
+  const serverCurrentRef = useRef<ReactionKey | null>(current ?? null);
+  useEffect(() => {
+    serverCurrentRef.current = current ?? null;
+    setCurrentLocal(current ?? null);
+  }, [current]);
+
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerAnchor, setPickerAnchor] = useState<PickerAnchor | undefined>(
     undefined,
   );
   const [hoverX, setHoverX] = useState<number | null>(null);
   const hoverKeyRef = useRef<ReactionKey | null>(null);
+  const startXRef = useRef<number>(0);
   const [animKey, setAnimKey] = useState(0);
+
   const RX = useMemo(() => pickReactions(availableKeys), [availableKeys]);
 
+  // Medición de anclas y bounds del contenedor (para centrar el picker en el card)
   const likeAnchorRef = useRef<View>(null);
+  const wrapRef = useRef<View>(null);
+  const [containerBounds, setContainerBounds] = useState<
+    Readonly<{ x: number; width: number }> | undefined
+  >(undefined);
 
-  const countsLocal = useMemo<Required<ReactionCounts>>(
+  const measureAll = useCallback(() => {
+    const view = likeAnchorRef.current as unknown as {
+      measureInWindow?: (
+        cb: (x: number, y: number, w: number, h: number) => void,
+      ) => void;
+    } | null;
+    const wrap = wrapRef.current as unknown as {
+      measureInWindow?: (
+        cb: (x: number, y: number, w: number, h: number) => void,
+      ) => void;
+    } | null;
+
+    if (view?.measureInWindow) {
+      view.measureInWindow((x, y, w, h) => {
+        // ⚠️ sin restar insets: Portal se posiciona en coordenadas de ventana
+        const anchor: PickerAnchor = { x, y, width: w, height: h };
+        setPickerAnchor(anchor);
+      });
+    } else {
+      setPickerAnchor(undefined);
+    }
+
+    if (wrap?.measureInWindow) {
+      wrap.measureInWindow((x, _y, w, _h) => {
+        setContainerBounds({ x, width: w });
+      });
+    } else {
+      setContainerBounds(undefined);
+    }
+  }, []);
+
+  const openPicker = useCallback(() => {
+    requestAnimationFrame(() => {
+      measureAll();
+      setPickerOpen(true);
+    });
+  }, [measureAll]);
+
+  const closePicker = useCallback(() => {
+    setPickerOpen(false);
+    setHoverX(null);
+    hoverKeyRef.current = null;
+  }, []);
+
+  // Conteos optimistas
+  const countsBase = useMemo<Required<ReactionCounts>>(
     () => ({
       like: 0,
       love: 0,
@@ -107,46 +198,35 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
     [counts],
   );
 
-  const currentMeta =
-    (currentLocal && REACTIONS.find(r => r.key === currentLocal)) ||
-    REACTIONS.find(r => r.key === PRIMARY)!;
+  const countsOptimistic = useMemo<Required<ReactionCounts>>(() => {
+    const out = { ...countsBase };
+    const prev = serverCurrentRef.current;
+    const now = currentLocal;
+    if (prev && out[prev] > 0) out[prev] -= 1;
+    if (now) out[now] += 1;
+    return out;
+  }, [countsBase, currentLocal]);
+
+  const currentMeta = useMemo(
+    () =>
+      currentLocal
+        ? (REACTIONS.find(r => r.key === currentLocal) ?? null)
+        : null,
+    [currentLocal],
+  );
 
   const weight: TextStyle['fontWeight'] = currentLocal ? '700' : '500';
 
+  // Tap rápido = like / deshacer like
   const quickLike = useCallback((): void => {
-    const next = currentLocal === PRIMARY ? null : PRIMARY;
+    const was = currentLocal;
+    const next: ReactionKey | null = was === PRIMARY ? null : PRIMARY;
     setCurrentLocal(next);
     if (next) setAnimKey(k => k + 1);
     onReact?.(id, PRIMARY, Boolean(next));
   }, [currentLocal, id, onReact]);
 
-  const measureAnchor = useCallback(() => {
-    const view = likeAnchorRef.current as unknown as {
-      measureInWindow?: (
-        cb: (x: number, y: number, w: number, h: number) => void,
-      ) => void;
-    } | null;
-    if (view?.measureInWindow) {
-      view.measureInWindow((x, y, w, h) => {
-        setPickerAnchor({ x, y, width: w, height: h });
-      });
-    } else {
-      setPickerAnchor(undefined);
-    }
-  }, []);
-
-  const openPicker = useCallback(() => {
-    measureAnchor();
-    setPickerOpen(true);
-  }, [measureAnchor]);
-
-  const closePicker = useCallback(() => {
-    setPickerOpen(false);
-    setHoverX(null);
-    hoverKeyRef.current = null;
-  }, []);
-
-  // Gestos: Tap rápido vs Pan activado por long-press
+  // Gestos: Tap vs Pan tras long-press con histéresis
   const tap = useMemo(
     () =>
       Gesture.Tap()
@@ -168,11 +248,15 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
       .cancelsTouchesInView(true)
       .onStart(e => {
         active = true;
+        startXRef.current = e.absoluteX;
         openPicker();
-        setHoverX(e.absoluteX);
+        // al abrir, que empiece en la primera reacción; dejamos que el picker haga snap al índice 0
+        setHoverX(null);
       })
       .onChange(e => {
-        if (active) setHoverX(e.absoluteX);
+        if (!active) return;
+        const dx = Math.abs(e.absoluteX - startXRef.current);
+        if (dx >= 6) setHoverX(e.absoluteX);
       })
       .onEnd(() => {
         active = false;
@@ -193,29 +277,38 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
   const combo = useMemo(() => Gesture.Race(tap, pan), [pan, tap]);
 
   return (
-    <View style={styles.wrap}>
+    <View ref={wrapRef} collapsable={false} style={styles.wrap}>
+      {/* Resumen estilo FB */}
       <View style={styles.topRow}>
         <ReactionSummary
-          counts={countsLocal}
+          counts={countsOptimistic}
           {...(availableKeys ? ({ availableKeys } as const) : {})}
         />
-        <Text variant="labelMedium" style={styles.topStats}>
+        <Text variant="labelSmall" style={styles.topStats}>
           {commentsCount > 0 ? `${commentsCount} comentarios` : ''}
           {commentsCount > 0 && sharesCount > 0 ? '  •  ' : ''}
           {sharesCount > 0 ? `Compartido ${sharesCount}` : ''}
         </Text>
       </View>
 
+      {/* Acciones distribuidas a tercios (más compacto) */}
       <View style={styles.actionsRow}>
         <GestureDetector gesture={combo}>
-          <View ref={likeAnchorRef} collapsable={false} style={styles.btn}>
-            <LottieView
-              key={animKey}
-              source={currentMeta.lottie}
-              autoPlay
-              loop={false}
-              style={{ width: 26, height: 26, marginRight: 6 }}
-            />
+          <View ref={likeAnchorRef} collapsable={false} style={styles.btnFlex}>
+            {currentMeta ? (
+              <LottieView
+                key={animKey}
+                source={currentMeta.lottie}
+                autoPlay
+                loop={false}
+                style={{
+                  width: 22,
+                  height: 22,
+                  marginRight: 6,
+                  transform: [{ scale: NORMALIZE_SCALE[currentLocal!] ?? 1 }],
+                }}
+              />
+            ) : null}
             <Text
               variant="labelLarge"
               style={{
@@ -226,25 +319,27 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
               }}
             >
               {currentLocal
-                ? REACTIONS.find(r => r.key === currentLocal)?.label
+                ? (REACTIONS.find(r => r.key === currentLocal)?.label ??
+                  'Me gusta')
                 : 'Me gusta'}
             </Text>
           </View>
         </GestureDetector>
 
-        <Pressable style={styles.btn} onPress={() => onCommentPress?.(id)}>
-          <Text variant="labelLarge" style={styles.muted}>
+        <Pressable style={styles.btnFlex} onPress={() => onCommentPress?.(id)}>
+          <Text variant="labelLarge" style={styles.mutedCenter}>
             Comentar
           </Text>
         </Pressable>
 
-        <Pressable style={styles.btn} onPress={() => onSharePress?.(id)}>
-          <Text variant="labelLarge" style={styles.muted}>
+        <Pressable style={styles.btnFlex} onPress={() => onSharePress?.(id)}>
+          <Text variant="labelLarge" style={styles.mutedCenter}>
             Compartir
           </Text>
         </Pressable>
       </View>
 
+      {/* Picker anclado al botón y centrado dentro del card */}
       <ReactionPicker
         visible={pickerOpen}
         initial={currentLocal}
@@ -258,37 +353,61 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
         onHoverKeyChange={k => {
           hoverKeyRef.current = k;
         }}
+        initialIndex={0}
+        showIndicator={false}
+        {...(containerBounds ? ({ containerBounds } as const) : {})}
+        containerPadding={12}
       />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  wrap: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 6 },
-  topRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-  summaryWrap: { flexDirection: 'row', alignItems: 'center' },
-  bubbles: { position: 'relative', width: 40, height: 18 },
-  bubble: {
-    position: 'absolute',
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    overflow: 'hidden',
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.1)',
+  wrap: {
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(0,0,0,0.08)',
   },
-  summaryText: { marginLeft: 40, fontWeight: '700' },
-  topStats: { marginLeft: 'auto', opacity: 0.7 },
 
-  actionsRow: { flexDirection: 'row', alignItems: 'center' },
-  btn: {
+  topRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 16,
-    paddingVertical: 4,
+    marginBottom: 2,
+    minHeight: 18,
   },
-  muted: { opacity: 0.75 },
+  summaryWrap: { flexDirection: 'row', alignItems: 'center' },
+
+  bubbles: { position: 'relative', height: 16 },
+  bubble: {
+    position: 'absolute',
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+  },
+  summaryText: { marginLeft: 6, fontWeight: '700' },
+  topStats: { marginLeft: 'auto', opacity: 0.7 },
+
+  actionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 40,
+  },
+
+  btnFlex: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+  },
+
+  mutedCenter: { opacity: 0.8, textAlign: 'center' },
 });
 
 export default ReactionFooter;
