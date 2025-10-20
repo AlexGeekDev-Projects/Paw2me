@@ -13,6 +13,7 @@ import ReactionPicker, { type PickerAnchor } from './ReactionPicker';
 import { REACTIONS, pickReactions } from '@reactions/assets';
 import type { ReactionCounts, ReactionKey } from '@reactions/types';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import ReactionBreakdownModal from './ReactionBreakdownModal';
 
 export type ReactionFooterProps = Readonly<{
   id: string;
@@ -129,6 +130,7 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
   const hoverKeyRef = useRef<ReactionKey | null>(null);
   const startXRef = useRef<number>(0);
   const [animKey, setAnimKey] = useState(0);
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
 
   const RX = useMemo(() => pickReactions(availableKeys), [availableKeys]);
 
@@ -280,10 +282,20 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
     <View ref={wrapRef} collapsable={false} style={styles.wrap}>
       {/* Resumen estilo FB */}
       <View style={styles.topRow}>
-        <ReactionSummary
-          counts={countsOptimistic}
-          {...(availableKeys ? ({ availableKeys } as const) : {})}
-        />
+        {/** Sólo si hay reacciones: el resumen ya devuelve null si total===0 */}
+        <Pressable
+          onPress={() => setBreakdownOpen(true)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Ver desglose de reacciones"
+          style={styles.summaryWrap}
+        >
+          <ReactionSummary
+            counts={countsOptimistic}
+            {...(availableKeys ? ({ availableKeys } as const) : {})}
+          />
+        </Pressable>
+
         <Text variant="labelSmall" style={styles.topStats}>
           {commentsCount > 0 ? `${commentsCount} comentarios` : ''}
           {commentsCount > 0 && sharesCount > 0 ? '  •  ' : ''}
@@ -357,6 +369,12 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
         showIndicator={false}
         {...(containerBounds ? ({ containerBounds } as const) : {})}
         containerPadding={12}
+      />
+      <ReactionBreakdownModal
+        visible={breakdownOpen}
+        onDismiss={() => setBreakdownOpen(false)}
+        counts={countsOptimistic}
+        availableKeys={RX.map(r => r.key)}
       />
     </View>
   );

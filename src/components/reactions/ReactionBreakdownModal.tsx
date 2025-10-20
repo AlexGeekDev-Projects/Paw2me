@@ -12,7 +12,17 @@ type Props = Readonly<{
   availableKeys?: ReactionKey[];
 }>;
 
-/** Ajustes visuales para igualar “peso” entre lotties en el modal */
+type TabKey = 'all' | ReactionKey;
+type Order = 'desc' | 'asc';
+type LottieSource = React.ComponentProps<typeof LottieView>['source'];
+
+type RowItem = Readonly<{
+  key: ReactionKey;
+  label: string;
+  lottie: LottieSource;
+  n: number;
+}>;
+
 const NORMALIZE: Readonly<
   Partial<Record<ReactionKey, { scale?: number; dy?: number }>>
 > = {
@@ -25,8 +35,6 @@ const NORMALIZE: Readonly<
   match: { scale: 1.05 },
 };
 
-type TabKey = 'all' | ReactionKey;
-
 const ReactionBreakdownModal: React.FC<Props> = ({
   visible,
   onDismiss,
@@ -37,7 +45,7 @@ const ReactionBreakdownModal: React.FC<Props> = ({
   const RX = useMemo(() => pickReactions(availableKeys), [availableKeys]);
 
   const tabs = useMemo<readonly TabKey[]>(() => {
-    const withCount = RX.map(r => [r.key, counts[r.key] ?? 0] as const)
+    const withCount = RX.map(r => [r.key, counts[r.key] || 0] as const)
       .filter(([, n]) => n > 0)
       .sort((a, b) => b[1] - a[1])
       .map(([k]) => k);
@@ -47,10 +55,28 @@ const ReactionBreakdownModal: React.FC<Props> = ({
   }, [RX, counts]);
 
   const [tab, setTab] = useState<TabKey>('all');
+  const [order, setOrder] = useState<Order>('desc');
 
   const total = useMemo(
-    () => RX.reduce((s, r) => s + (counts[r.key] ?? 0), 0),
+    () => RX.reduce((s, r) => s + (counts[r.key] || 0), 0),
     [RX, counts],
+  );
+
+  const allItems = useMemo<RowItem[]>(() => {
+    // Construimos una lista tipada y estable
+    const items: RowItem[] = RX.map<RowItem>(r => ({
+      key: r.key,
+      label: r.label,
+      lottie: r.lottie as LottieSource,
+      n: counts[r.key] || 0,
+    }));
+    return items.filter(it => it.n > 0);
+  }, [RX, counts]);
+
+  const sortedAll = useMemo<RowItem[]>(
+    () =>
+      [...allItems].sort((a, b) => (order === 'desc' ? b.n - a.n : a.n - b.n)),
+    [allItems, order],
   );
 
   return (
@@ -100,58 +126,78 @@ const ReactionBreakdownModal: React.FC<Props> = ({
           })}
         </View>
 
+        {/* Ordenamiento (solo en “Todas”) */}
+        {tab === 'all' ? (
+          <View style={styles.orderRow}>
+            {(['desc', 'asc'] as const).map(o => {
+              const active = o === order;
+              return (
+                <Pressable
+                  key={o}
+                  onPress={() => setOrder(o)}
+                  style={[
+                    styles.orderChip,
+                    {
+                      backgroundColor: active
+                        ? theme.colors.primaryContainer
+                        : theme.colors.surfaceVariant,
+                      borderColor: theme.colors.outlineVariant,
+                    },
+                  ]}
+                >
+                  <Text
+                    variant="labelMedium"
+                    style={{
+                      color: active
+                        ? theme.colors.onPrimaryContainer
+                        : theme.colors.onSurfaceVariant,
+                    }}
+                  >
+                    {o === 'desc' ? 'Más usadas' : 'Menos usadas'}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
+
         <Divider style={{ opacity: 0.4 }} />
 
         {/* Contenido */}
         {tab === 'all' ? (
           <View style={styles.list}>
-            {RX.map(r => ({
-              key: r.key,
-              label: r.label,
-              lottie: r.lottie,
-              n: counts[r.key] ?? 0,
-            }))
-              .filter(item => item.n > 0)
-              .sort((a, b) => b.n - a.n)
-              .map(item => {
-                const adj = NORMALIZE[item.key] ?? {};
-                return (
-                  <View key={item.key} style={styles.row}>
-                    <View style={styles.iconCell}>
+            {sortedAll.map(item => {
+              const adj = NORMALIZE[item.key] || {};
+              return (
+                <View key={item.key} style={styles.row}>
+                  <View style={styles.iconCell}>
+                    <View style={styles.iconBox}>
                       <View
                         style={{
-                          width: 28,
-                          height: 28,
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                          transform: [
+                            { scale: adj.scale ?? 1 },
+                            { translateY: adj.dy ?? 0 },
+                          ],
                         }}
                       >
-                        <View
-                          style={{
-                            transform: [
-                              { scale: adj.scale ?? 1 },
-                              { translateY: adj.dy ?? 0 },
-                            ],
-                          }}
-                        >
-                          <LottieView
-                            source={item.lottie}
-                            autoPlay
-                            loop
-                            style={{ width: 28, height: 28 }}
-                          />
-                        </View>
+                        <LottieView
+                          source={item.lottie}
+                          autoPlay
+                          loop
+                          style={{ width: 28, height: 28 }}
+                        />
                       </View>
                     </View>
-                    <Text variant="bodyLarge" style={styles.rowLabel}>
-                      {item.label}
-                    </Text>
-                    <Text variant="bodyLarge" style={styles.rowCount}>
-                      {item.n}
-                    </Text>
                   </View>
-                );
-              })}
+                  <Text variant="bodyLarge" style={styles.rowLabel}>
+                    {item.label}
+                  </Text>
+                  <Text variant="bodyLarge" style={styles.rowCount}>
+                    {item.n}
+                  </Text>
+                </View>
+              );
+            })}
             {total === 0 ? (
               <Text
                 variant="bodyMedium"
@@ -165,20 +211,13 @@ const ReactionBreakdownModal: React.FC<Props> = ({
           <View style={styles.list}>
             {(() => {
               const meta = REACTIONS.find(r => r.key === tab)!;
-              const n = counts[tab] ?? 0;
-              const adj = NORMALIZE[tab] ?? {};
+              const n = counts[tab] || 0;
+              const adj = NORMALIZE[tab] || {};
               return (
                 <>
                   <View style={[styles.row, { marginBottom: 6 }]}>
                     <View style={styles.iconCell}>
-                      <View
-                        style={{
-                          width: 28,
-                          height: 28,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
+                      <View style={styles.iconBox}>
                         <View
                           style={{
                             transform: [
@@ -188,7 +227,7 @@ const ReactionBreakdownModal: React.FC<Props> = ({
                           }}
                         >
                           <LottieView
-                            source={meta.lottie}
+                            source={meta.lottie as LottieSource}
                             autoPlay
                             loop
                             style={{ width: 28, height: 28 }}
@@ -208,7 +247,7 @@ const ReactionBreakdownModal: React.FC<Props> = ({
                     variant="bodyMedium"
                     style={{ opacity: 0.7, marginTop: 12 }}
                   >
-                    (Aquí puedes listar usuarios cuando tengas esa data.)
+                    (Aquí podrás listar usuarios cuando tengas esa data.)
                   </Text>
                 </>
               );
@@ -238,6 +277,17 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
   },
+  orderRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  orderChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   list: { marginTop: 8 },
   row: {
     flexDirection: 'row',
@@ -247,6 +297,12 @@ const styles = StyleSheet.create({
   iconCell: {
     width: 36,
     height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconBox: {
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },

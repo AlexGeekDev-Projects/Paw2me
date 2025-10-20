@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import type { LayoutChangeEvent } from 'react-native';
 import { Card, Text, useTheme, Chip } from 'react-native-paper';
+import { PawIconAnimated } from '@components/feedback/Loading'; // ← ✅ huellita
 
 import type { AnimalCardVM } from '@models/animal';
 import {
@@ -110,16 +111,14 @@ function normalizeSize(input?: string | null): string | undefined {
   return title(t) ?? t;
 }
 
-/** Devuelve SOLO claves definidas, sin mutar (compat. exactOptionalPropertyTypes + readonly) */
+/** Devuelve SOLO claves definidas (compat. exactOptionalPropertyTypes) */
 function extractFromChips(chips?: readonly string[] | null): BreedSize {
   if (!Array.isArray(chips)) return {};
   const clean = chips.map(s => s.trim()).filter(Boolean);
   const rawSize = clean.find(s => SIZE_WORDS.has(s.toLowerCase()));
   const rawBreed = clean.find(s => !SIZE_WORDS.has(s.toLowerCase()));
-
   const breedV = rawBreed ? (title(rawBreed) ?? rawBreed) : undefined;
   const sizeV = normalizeSize(rawSize);
-
   return {
     ...(breedV ? { breed: breedV } : {}),
     ...(sizeV ? { size: sizeV } : {}),
@@ -145,7 +144,6 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
   const rawCover = str(opt.coverUrl);
   const rawThumb = str(opt.coverThumbUrl) ?? str(opt.thumbUrl);
 
-  // Explícito > inferido (sin props “presentes con undefined”)
   const inferred = extractFromChips(opt.chips);
   const breed: string | undefined = str(opt.breed) ?? inferred.breed;
   const size: string | undefined =
@@ -260,7 +258,7 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
   const onContentLayout = (e: LayoutChangeEvent): void =>
     setContentH(e.nativeEvent.layout.height);
 
-  // Estilos de chip dependientes del tema (oscuro/claro)
+  // Chips adaptados a tema
   const chipBg = theme.dark
     ? 'rgba(255,255,255,0.14)'
     : 'rgba(255,255,255,0.94)';
@@ -302,7 +300,7 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
             />
           ) : null}
 
-          {/* Gradiente debajo del contenido */}
+          {/* Gradiente */}
           {MaybeGradient ? (
             <MaybeGradient
               colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.58)']}
@@ -316,7 +314,7 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
             />
           )}
 
-          {/* Contenido por encima del gradiente */}
+          {/* Contenido */}
           <View
             style={[styles.bottomContent, { paddingVertical: PAD_V }]}
             onLayout={onContentLayout}
@@ -369,9 +367,12 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
             </Text>
           </View>
 
+          {/* 🔵 Huellita de carga centrada (recuperada) */}
           {isLoading && showSpinner ? (
             <View style={styles.center} pointerEvents="none" accessible={false}>
-              <View style={styles.dot} />
+              <View style={styles.pawBadge}>
+                <PawIconAnimated />
+              </View>
             </View>
           ) : null}
         </View>
@@ -434,7 +435,6 @@ const styles = StyleSheet.create({
 
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   title: { fontWeight: '700', flexShrink: 1, flexGrow: 1, marginRight: 8 },
-
   titleChipsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -447,7 +447,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingVertical: 0,
     borderWidth: StyleSheet.hairlineWidth,
-    // backgroundColor y borderColor vienen dados dinámicamente
   },
   chipText: { fontSize: 11 },
 
@@ -458,11 +457,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: 'rgba(0,0,0,0.28)',
+  pawBadge: {
+    padding: 10,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.25)', // contraste leve sobre la foto
   },
 
   topBorder: {
