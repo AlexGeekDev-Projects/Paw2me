@@ -10,6 +10,7 @@ import {
 import type { LayoutChangeEvent } from 'react-native';
 import { Card, Text, useTheme, Chip } from 'react-native-paper';
 import { PawIconAnimated } from '@components/feedback/Loading'; // ← ✅ huellita
+import { useAnimalReactions } from '@hooks/useAnimalReactions';
 
 import type { AnimalCardVM } from '@models/animal';
 import {
@@ -139,6 +140,11 @@ const PROVIDER: CdnProvider = 'auto';
 const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
   const theme = useTheme();
   const { width: winW } = useWindowDimensions();
+  const { useAuth } = require('@hooks/useAuth');
+  const auth = typeof useAuth === 'function' ? useAuth() : undefined;
+  const userId: string | null = auth?.user?.uid ?? null;
+
+  const { counts, current, react } = useAnimalReactions(data.id, userId);
 
   const opt = data as OptionalFields;
   const rawCover = str(opt.coverUrl);
@@ -382,17 +388,13 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
       <View style={styles.topBorder} />
       <ReactionFooter
         id={data.id}
-        commentsCount={comments}
-        sharesCount={shares}
-        availableKeys={[
-          'love',
-          'sad',
-          'angry',
-          'happy',
-          'like',
-          'wow',
-          'match',
-        ]}
+        current={current ?? null}
+        counts={counts}
+        availableKeys={['love', 'sad', 'match']}
+        onReact={async (_id, key, active) => {
+          if (key !== 'love' && key !== 'sad' && key !== 'match') return;
+          await react(active ? key : null);
+        }}
       />
     </Card>
   );
