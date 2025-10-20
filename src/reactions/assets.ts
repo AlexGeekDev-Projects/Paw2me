@@ -14,10 +14,10 @@ export const REACTIONS: ReactionMeta[] = [
   { key: 'like', label: 'Me gusta', lottie: like },
   { key: 'love', label: 'Me encanta', lottie: love },
   { key: 'match', label: 'Match', lottie: match },
-  { key: 'happy', label: 'Feliz', lottie: happy },
-  { key: 'wow', label: 'Asombro', lottie: wow },
-  { key: 'sad', label: 'Triste', lottie: sad },
-  { key: 'angry', label: 'Molesta', lottie: angry },
+  { key: 'happy', label: 'Me divierte', lottie: happy },
+  { key: 'wow', label: 'Me asombra', lottie: wow },
+  { key: 'sad', label: 'Me entristece', lottie: sad },
+  { key: 'angry', label: 'Me molesta', lottie: angry },
 ];
 
 /** Mantiene el orden global de REACTIONS pero filtra por keys dadas. */

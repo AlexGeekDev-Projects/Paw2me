@@ -458,8 +458,14 @@ const ExploreScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  headerWrap: { gap: 8, marginBottom: 8 },
-  chipsScroll: { paddingVertical: 4, paddingRight: 8, alignItems: 'center' },
+  headerWrap: { gap: 8, marginBottom: 4 }, // antes 8
+  chipsScroll: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 0, // ← quita el 96
+    alignItems: 'center',
+    gap: 8,
+  },
   chip: { marginRight: 8 },
   emptyContainer: {
     flex: 1,
