@@ -27,7 +27,7 @@ export type ReactionFooterProps = Readonly<{
   availableKeys?: ReactionKey[];
 }>;
 
-const PRIMARY: ReactionKey = 'like';
+const PRIMARY: ReactionKey = 'love';
 const LONG_MS = 280;
 
 /** Misma normalización visual que el picker, aplicada a resumen y botón */
