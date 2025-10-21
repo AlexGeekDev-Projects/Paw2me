@@ -12,6 +12,7 @@ import {
   where,
   orderBy,
   limit,
+  startAfter,
   type FirebaseFirestoreTypes,
 } from '@react-native-firebase/firestore';
 import { getAuth } from '@react-native-firebase/auth';
@@ -33,6 +34,7 @@ export {
   orderBy,
   limit,
   getStorage,
+  startAfter,
   type FirebaseFirestoreTypes,
 };
 
@@ -42,3 +44,5 @@ export const nowTs = () => serverTimestamp();
 // Generador de IDs para una colección
 export const newId = (collectionPath: string) =>
   doc(collection(getFirestore(), collectionPath)).id;
+
+export { deleteDoc } from '@react-native-firebase/firestore';

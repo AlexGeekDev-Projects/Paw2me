@@ -32,13 +32,13 @@ const LONG_MS = 280;
 
 /** Misma normalización visual que el picker, aplicada a resumen y botón */
 const NORMALIZE_SCALE: Readonly<Partial<Record<ReactionKey, number>>> = {
-  like: 1.7,
-  love: 1.6,
-  happy: 0.95,
-  wow: 0.95,
-  sad: 0.75,
-  angry: 0.7,
-  match: 1.45,
+  like: 1.5,
+  love: 1.5,
+  happy: 1.5,
+  wow: 1.5,
+  sad: 1.5,
+  angry: 1.5,
+  match: 1.5,
 };
 
 /** Burbujas + total (estilo FB), normalizadas */
@@ -373,6 +373,7 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
       <ReactionBreakdownModal
         visible={breakdownOpen}
         onDismiss={() => setBreakdownOpen(false)}
+        pawId={id} // ← ESTA LÍNEA
         counts={countsOptimistic}
         availableKeys={RX.map(r => r.key)}
       />
