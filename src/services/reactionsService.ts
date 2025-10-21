@@ -1,14 +1,14 @@
-// src/services/reactionsService.ts
 import {
   getFirestore,
   doc,
   collection,
-  setDoc,
+  where,
   getDocs,
   query,
   orderBy,
   limit,
   nowTs,
+  startAfter,
   type FirebaseFirestoreTypes,
 } from '@services/firebase';
 
@@ -142,7 +142,8 @@ const userMatchDocRef = (
 /* ──────────────────────────────
  * Utils estrictos
  * ────────────────────────────── */
-const isAnimalStatus = (v: unknown): v is AnimalStatus =>
+export type AnimalStatusGuard = (v: unknown) => v is AnimalStatus;
+const isAnimalStatus: AnimalStatusGuard = (v: unknown): v is AnimalStatus =>
   v === 'disponible' ||
   v === 'en_proceso' ||
   v === 'adoptado' ||
@@ -177,6 +178,23 @@ const toUserMatchAnimal = (
     ...(status ? { status } : {}),
   };
 };
+
+const tsToMillis = (
+  v: FirebaseFirestoreTypes.Timestamp | FirebaseFirestoreTypes.FieldValue,
+): number =>
+  (v as FirebaseFirestoreTypes.Timestamp)?.toMillis
+    ? (v as FirebaseFirestoreTypes.Timestamp).toMillis()
+    : 0;
+
+const sortByUpdatedAt = <T extends { updatedAt: ReactionDoc['updatedAt'] }>(
+  arr: readonly T[],
+  order: 'asc' | 'desc',
+): T[] =>
+  [...arr].sort((a, b) => {
+    const am = tsToMillis(a.updatedAt);
+    const bm = tsToMillis(b.updatedAt);
+    return order === 'asc' ? am - bm : bm - am;
+  });
 
 /* ──────────────────────────────
  * Listeners (callbacks tipados)
@@ -281,11 +299,6 @@ export async function listUserMatches(
 
 /* ──────────────────────────────
  * Escritura con transacción
- *  - Actualiza contadores
- *  - Guarda/elimina reacción del usuario
- *  - Espejo de match:
- *      /paws/{animalId}/matches/{userId}
- *      /users/{userId}/matches/{animalId}  ← con snapshot mínimo del paw
  * ────────────────────────────── */
 export async function setUserReaction(params: {
   animalId: string;
@@ -386,4 +399,245 @@ export async function setUserReaction(params: {
       }
     },
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Listeners de reactores con fallback sin índice compuesto
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Por clave */
+export function listenReactorsByKey(
+  pawId: string,
+  key: FireReactionKey,
+  cb: (items: ReadonlyArray<ReactionDoc & { id: string }>) => void,
+  opts?: { limit?: number; order?: 'asc' | 'desc' },
+): Unsub {
+  const n: number =
+    typeof opts?.limit === 'number' && opts.limit > 0 ? opts.limit : 50;
+  const dir: 'asc' | 'desc' = opts?.order === 'asc' ? 'asc' : 'desc';
+
+  const col: FirebaseFirestoreTypes.CollectionReference<ReactionDoc> =
+    collection(
+      getFirestore(),
+      'paws',
+      pawId,
+      'reactions',
+    ) as FirebaseFirestoreTypes.CollectionReference<ReactionDoc>;
+
+  let currentUnsub: Unsub | null = null;
+
+  const subscribe = (withOrder: boolean): void => {
+    const qRef: FirebaseFirestoreTypes.Query<ReactionDoc> = withOrder
+      ? query(col, where('key', '==', key), orderBy('updatedAt'), limit(n))
+      : query(col, where('key', '==', key), limit(n));
+
+    currentUnsub = qRef.onSnapshot(
+      (snap: FirebaseFirestoreTypes.QuerySnapshot<ReactionDoc>) => {
+        const mapped = snap.docs.map(
+          (
+            d: FirebaseFirestoreTypes.QueryDocumentSnapshot<ReactionDoc>,
+          ): ReactionDoc & { id: string } => ({ id: d.id, ...d.data() }),
+        );
+        const ordered = sortByUpdatedAt(mapped, dir);
+        cb(ordered);
+      },
+      // Fallback: si falla (índice), reintentamos SIN orderBy
+      (_err: Error) => {
+        if (withOrder) subscribe(false);
+        else cb([]);
+      },
+    );
+  };
+
+  subscribe(true);
+  return () => {
+    currentUnsub?.();
+  };
+}
+
+/** Todas (sin filtro de clave) */
+export function listenReactorsAll(
+  pawId: string,
+  cb: (items: ReadonlyArray<ReactionDoc & { id: string }>) => void,
+  opts?: { limit?: number; order?: 'asc' | 'desc' },
+): Unsub {
+  const n: number =
+    typeof opts?.limit === 'number' && opts.limit > 0 ? opts.limit : 120;
+  const dir: 'asc' | 'desc' = opts?.order === 'asc' ? 'asc' : 'desc';
+
+  const col: FirebaseFirestoreTypes.CollectionReference<ReactionDoc> =
+    collection(
+      getFirestore(),
+      'paws',
+      pawId,
+      'reactions',
+    ) as FirebaseFirestoreTypes.CollectionReference<ReactionDoc>;
+
+  let currentUnsub: Unsub | null = null;
+
+  const subscribe = (withOrder: boolean): void => {
+    const qRef: FirebaseFirestoreTypes.Query<ReactionDoc> = withOrder
+      ? query(col, orderBy('updatedAt'), limit(n))
+      : query(col, limit(n));
+
+    currentUnsub = qRef.onSnapshot(
+      (snap: FirebaseFirestoreTypes.QuerySnapshot<ReactionDoc>) => {
+        const mapped = snap.docs.map(
+          (
+            d: FirebaseFirestoreTypes.QueryDocumentSnapshot<ReactionDoc>,
+          ): ReactionDoc & { id: string } => ({ id: d.id, ...d.data() }),
+        );
+        const ordered = sortByUpdatedAt(mapped, dir);
+        cb(ordered);
+      },
+      (_err: Error) => {
+        if (withOrder) subscribe(false);
+        else cb([]);
+      },
+    );
+  };
+
+  subscribe(true);
+  return () => {
+    currentUnsub?.();
+  };
+}
+
+/* ──────────────────────────────
+ * Paginación one-shot con fallback
+ * ────────────────────────────── */
+
+export type PageResult = Readonly<{
+  items: ReadonlyArray<ReactionDoc & { id: string }>;
+  nextCursor?: FirebaseFirestoreTypes.Timestamp | null;
+  hasMore: boolean;
+}>;
+
+export async function listReactorsAll(
+  pawId: string,
+  opts?: {
+    limit?: number;
+    order?: 'asc' | 'desc';
+    startAfterAt?: FirebaseFirestoreTypes.Timestamp | null;
+  },
+): Promise<PageResult> {
+  const n: number =
+    typeof opts?.limit === 'number' && opts.limit > 0 ? opts.limit : 120;
+  const dir: 'asc' | 'desc' = opts?.order === 'asc' ? 'asc' : 'desc';
+
+  const col: FirebaseFirestoreTypes.CollectionReference<ReactionDoc> =
+    collection(
+      getFirestore(),
+      'paws',
+      pawId,
+      'reactions',
+    ) as FirebaseFirestoreTypes.CollectionReference<ReactionDoc>;
+
+  try {
+    let qRef: FirebaseFirestoreTypes.Query<ReactionDoc> = query(
+      col,
+      orderBy('updatedAt'),
+      limit(n),
+    );
+    if (opts?.startAfterAt) qRef = query(qRef, startAfter(opts.startAfterAt));
+
+    const snap: FirebaseFirestoreTypes.QuerySnapshot<ReactionDoc> =
+      await getDocs(qRef);
+
+    const docs = snap.docs.map(
+      (
+        d: FirebaseFirestoreTypes.QueryDocumentSnapshot<ReactionDoc>,
+      ): ReactionDoc & { id: string } => ({ id: d.id, ...d.data() }),
+    );
+    const ordered = sortByUpdatedAt(docs, dir);
+    const last = ordered[ordered.length - 1];
+    const nextCursor =
+      last && (last.updatedAt as FirebaseFirestoreTypes.Timestamp)?.toMillis
+        ? (last.updatedAt as FirebaseFirestoreTypes.Timestamp)
+        : null;
+
+    return { items: ordered, nextCursor, hasMore: ordered.length === n };
+  } catch {
+    // Fallback sin orderBy ni cursor (no hay índice compuesto)
+    const qRef: FirebaseFirestoreTypes.Query<ReactionDoc> = query(
+      col,
+      limit(n),
+    );
+    const snap: FirebaseFirestoreTypes.QuerySnapshot<ReactionDoc> =
+      await getDocs(qRef);
+
+    const docs = snap.docs.map(
+      (
+        d: FirebaseFirestoreTypes.QueryDocumentSnapshot<ReactionDoc>,
+      ): ReactionDoc & { id: string } => ({ id: d.id, ...d.data() }),
+    );
+    const ordered = sortByUpdatedAt(docs, dir);
+    return { items: ordered, nextCursor: null, hasMore: false };
+  }
+}
+
+export async function listReactorsByKey(
+  pawId: string,
+  key: FireReactionKey,
+  opts?: {
+    limit?: number;
+    order?: 'asc' | 'desc';
+    startAfterAt?: FirebaseFirestoreTypes.Timestamp | null;
+  },
+): Promise<PageResult> {
+  const n: number =
+    typeof opts?.limit === 'number' && opts.limit > 0 ? opts.limit : 80;
+  const dir: 'asc' | 'desc' = opts?.order === 'asc' ? 'asc' : 'desc';
+
+  const col: FirebaseFirestoreTypes.CollectionReference<ReactionDoc> =
+    collection(
+      getFirestore(),
+      'paws',
+      pawId,
+      'reactions',
+    ) as FirebaseFirestoreTypes.CollectionReference<ReactionDoc>;
+
+  try {
+    let qRef: FirebaseFirestoreTypes.Query<ReactionDoc> = query(
+      col,
+      where('key', '==', key),
+      orderBy('updatedAt'),
+      limit(n),
+    );
+    if (opts?.startAfterAt) qRef = query(qRef, startAfter(opts.startAfterAt));
+
+    const snap: FirebaseFirestoreTypes.QuerySnapshot<ReactionDoc> =
+      await getDocs(qRef);
+
+    const docs = snap.docs.map(
+      (
+        d: FirebaseFirestoreTypes.QueryDocumentSnapshot<ReactionDoc>,
+      ): ReactionDoc & { id: string } => ({ id: d.id, ...d.data() }),
+    );
+    const ordered = sortByUpdatedAt(docs, dir);
+    const last = ordered[ordered.length - 1];
+    const nextCursor =
+      last && (last.updatedAt as FirebaseFirestoreTypes.Timestamp)?.toMillis
+        ? (last.updatedAt as FirebaseFirestoreTypes.Timestamp)
+        : null;
+
+    return { items: ordered, nextCursor, hasMore: ordered.length === n };
+  } catch {
+    // Fallback sin orderBy ni cursor (no hay índice compuesto)
+    const qRef: FirebaseFirestoreTypes.Query<ReactionDoc> = query(
+      col,
+      where('key', '==', key),
+      limit(n),
+    );
+    const snap: FirebaseFirestoreTypes.QuerySnapshot<ReactionDoc> =
+      await getDocs(qRef);
+
+    const docs = snap.docs.map(
+      (
+        d: FirebaseFirestoreTypes.QueryDocumentSnapshot<ReactionDoc>,
+      ): ReactionDoc & { id: string } => ({ id: d.id, ...d.data() }),
+    );
+    const ordered = sortByUpdatedAt(docs, dir);
+    return { items: ordered, nextCursor: null, hasMore: false };
+  }
 }

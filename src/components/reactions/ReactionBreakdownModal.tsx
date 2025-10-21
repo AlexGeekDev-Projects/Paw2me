@@ -1,13 +1,33 @@
-import React, { useMemo, useState } from 'react';
+// src/components/reactions/ReactionBreakdownModal.tsx
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+} from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
 import { Modal, Portal, Text, useTheme, Divider } from 'react-native-paper';
 import LottieView from 'lottie-react-native';
 import { REACTIONS, pickReactions } from '@reactions/assets';
 import type { ReactionCounts, ReactionKey } from '@reactions/types';
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  type FirebaseFirestoreTypes,
+} from '@services/firebase';
+import {
+  listenReactorsByKey,
+  listenReactorsAll,
+  type FireReactionKey,
+  type ReactionDoc,
+} from '@services/reactionsService';
 
 type Props = Readonly<{
   visible: boolean;
   onDismiss: () => void;
+  pawId: string;
   counts: Required<ReactionCounts>;
   availableKeys?: ReactionKey[];
 }>;
@@ -23,6 +43,20 @@ type RowItem = Readonly<{
   n: number;
 }>;
 
+type UserLight = Readonly<{
+  uid: string;
+  displayName?: string;
+  fullName?: string;
+  username?: string;
+}>;
+
+type ReactorView = Readonly<{
+  userId: string;
+  name: string;
+  key?: FireReactionKey | null; // clave de reacción (para "Todas")
+  at?: FirebaseFirestoreTypes.Timestamp | FirebaseFirestoreTypes.FieldValue;
+}>;
+
 const NORMALIZE: Readonly<
   Partial<Record<ReactionKey, { scale?: number; dy?: number }>>
 > = {
@@ -35,9 +69,45 @@ const NORMALIZE: Readonly<
   match: { scale: 1.05 },
 };
 
+const isFireKey = (k: ReactionKey): k is FireReactionKey =>
+  k === 'love' || k === 'sad' || k === 'match';
+
+const userRef = (
+  uid: string,
+): FirebaseFirestoreTypes.DocumentReference<UserLight> =>
+  doc(
+    getFirestore(),
+    'users',
+    uid,
+  ) as FirebaseFirestoreTypes.DocumentReference<UserLight>;
+
+const displayFromUser = (
+  u: UserLight | undefined,
+  fallback: string,
+): string => {
+  if (u?.fullName && u.fullName.trim()) return u.fullName;
+  if (u?.displayName && u.displayName.trim()) return u.displayName;
+  if (u?.username && u.username.trim()) return u.username;
+  // No exponer UID: fallback genérico
+  return fallback;
+};
+
+function isTimestamp(
+  v:
+    | FirebaseFirestoreTypes.Timestamp
+    | FirebaseFirestoreTypes.FieldValue
+    | undefined,
+): v is FirebaseFirestoreTypes.Timestamp {
+  return (
+    Boolean(v) &&
+    typeof (v as FirebaseFirestoreTypes.Timestamp).toMillis === 'function'
+  );
+}
+
 const ReactionBreakdownModal: React.FC<Props> = ({
   visible,
   onDismiss,
+  pawId,
   counts,
   availableKeys,
 }) => {
@@ -49,9 +119,7 @@ const ReactionBreakdownModal: React.FC<Props> = ({
       .filter(([, n]) => n > 0)
       .sort((a, b) => b[1] - a[1])
       .map(([k]) => k);
-    return (
-      withCount.length ? (['all', ...withCount] as const) : (['all'] as const)
-    ) as readonly TabKey[];
+    return ['all', ...withCount] as const;
   }, [RX, counts]);
 
   const [tab, setTab] = useState<TabKey>('all');
@@ -63,7 +131,6 @@ const ReactionBreakdownModal: React.FC<Props> = ({
   );
 
   const allItems = useMemo<RowItem[]>(() => {
-    // Construimos una lista tipada y estable
     const items: RowItem[] = RX.map<RowItem>(r => ({
       key: r.key,
       label: r.label,
@@ -78,6 +145,100 @@ const ReactionBreakdownModal: React.FC<Props> = ({
       [...allItems].sort((a, b) => (order === 'desc' ? b.n - a.n : a.n - b.n)),
     [allItems, order],
   );
+
+  // Reactores mostrados en la lista (para tab actual)
+  const [reactors, setReactors] = useState<ReadonlyArray<ReactorView>>([]);
+  // Cache de nombres (persiste entre aperturas)
+  const namesCacheRef = useRef<Map<string, string>>(new Map());
+
+  // Util: resuelve nombres faltantes y devuelve ReactorView completo
+  const resolveNames = useCallback(
+    async (
+      docs: ReadonlyArray<ReactionDoc & { id: string }>,
+    ): Promise<ReadonlyArray<ReactorView>> => {
+      const missing = docs
+        .map(d => d.userId)
+        .filter(uid => !namesCacheRef.current.has(uid));
+
+      if (missing.length > 0) {
+        const results = await Promise.all(
+          missing.map(async (uid): Promise<[string, string]> => {
+            const s = await getDoc(userRef(uid));
+            const name = s.exists()
+              ? displayFromUser(s.data(), 'Usuario')
+              : 'Usuario';
+            return [uid, name];
+          }),
+        );
+        results.forEach(([uid, name]) => namesCacheRef.current.set(uid, name));
+      }
+
+      return docs.map(d => ({
+        userId: d.userId,
+        name: namesCacheRef.current.get(d.userId) ?? 'Usuario',
+        key: d.key,
+        at: d.updatedAt,
+      }));
+    },
+    [],
+  );
+
+  // Listener por pestaña (clave específica o “all”)
+  useEffect(() => {
+    if (!visible) return;
+
+    if (tab === 'all') {
+      const unsub = listenReactorsAll(
+        pawId,
+        async docs => {
+          const seen = new Set<string>();
+          const dedup: Array<ReactionDoc & { id: string }> = [];
+          for (const d of docs) {
+            if (!seen.has(d.userId)) {
+              seen.add(d.userId);
+              dedup.push(d);
+            }
+          }
+          const views = await resolveNames(dedup);
+          setReactors(views);
+        },
+        { limit: 120, order },
+      );
+      return () => unsub();
+    }
+
+    if (isFireKey(tab)) {
+      const unsub = listenReactorsByKey(
+        pawId,
+        tab,
+        async docs => {
+          const views = await resolveNames(docs);
+          setReactors(views);
+        },
+        { limit: 80, order },
+      );
+      return () => unsub();
+    }
+
+    // Para claves no Fire (like/happy/wow/angry) no hay colección en Firestore
+    setReactors([]);
+    return;
+  }, [visible, pawId, tab, order, resolveNames]);
+
+  // Al cerrar el modal limpiamos sólo la lista mostrada (cache persiste)
+  useEffect(() => {
+    if (!visible) setReactors([]);
+  }, [visible]);
+
+  const reactorsSorted = useMemo(() => {
+    const arr = reactors.slice();
+    arr.sort((a, b) => {
+      const am = isTimestamp(a.at) ? a.at.toMillis() : 0;
+      const bm = isTimestamp(b.at) ? b.at.toMillis() : 0;
+      return order === 'asc' ? am - bm : bm - am;
+    });
+    return arr;
+  }, [reactors, order]);
 
   return (
     <Portal>
@@ -126,46 +287,45 @@ const ReactionBreakdownModal: React.FC<Props> = ({
           })}
         </View>
 
-        {/* Ordenamiento (solo en “Todas”) */}
-        {tab === 'all' ? (
-          <View style={styles.orderRow}>
-            {(['desc', 'asc'] as const).map(o => {
-              const active = o === order;
-              return (
-                <Pressable
-                  key={o}
-                  onPress={() => setOrder(o)}
-                  style={[
-                    styles.orderChip,
-                    {
-                      backgroundColor: active
-                        ? theme.colors.primaryContainer
-                        : theme.colors.surfaceVariant,
-                      borderColor: theme.colors.outlineVariant,
-                    },
-                  ]}
+        {/* Ordenamiento */}
+        <View style={styles.orderRow}>
+          {(['desc', 'asc'] as const).map(o => {
+            const active = o === order;
+            return (
+              <Pressable
+                key={o}
+                onPress={() => setOrder(o)}
+                style={[
+                  styles.orderChip,
+                  {
+                    backgroundColor: active
+                      ? theme.colors.primaryContainer
+                      : theme.colors.surfaceVariant,
+                    borderColor: theme.colors.outlineVariant,
+                  },
+                ]}
+              >
+                <Text
+                  variant="labelMedium"
+                  style={{
+                    color: active
+                      ? theme.colors.onPrimaryContainer
+                      : theme.colors.onSurfaceVariant,
+                  }}
                 >
-                  <Text
-                    variant="labelMedium"
-                    style={{
-                      color: active
-                        ? theme.colors.onPrimaryContainer
-                        : theme.colors.onSurfaceVariant,
-                    }}
-                  >
-                    {o === 'desc' ? 'Más usadas' : 'Menos usadas'}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
+                  {o === 'desc' ? 'Más recientes' : 'Más antiguas'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
         <Divider style={{ opacity: 0.4 }} />
 
         {/* Contenido */}
         {tab === 'all' ? (
           <View style={styles.list}>
+            {/* Resumen por tipo */}
             {sortedAll.map(item => {
               const adj = NORMALIZE[item.key] || {};
               return (
@@ -181,7 +341,7 @@ const ReactionBreakdownModal: React.FC<Props> = ({
                         }}
                       >
                         <LottieView
-                          source={item.lottie}
+                          source={item.lottie as LottieSource}
                           autoPlay
                           loop
                           style={{ width: 28, height: 28 }}
@@ -198,14 +358,62 @@ const ReactionBreakdownModal: React.FC<Props> = ({
                 </View>
               );
             })}
-            {total === 0 ? (
-              <Text
-                variant="bodyMedium"
-                style={{ opacity: 0.7, textAlign: 'center', marginTop: 16 }}
-              >
+
+            <Divider style={{ opacity: 0.3, marginTop: 8 }} />
+
+            {/* Usuarios (de-duplicados) */}
+            <Text
+              variant="titleSmall"
+              style={{ marginTop: 8, marginBottom: 4, opacity: 0.8 }}
+            >
+              Usuarios
+            </Text>
+
+            {reactorsSorted.length === 0 ? (
+              <Text variant="bodyMedium" style={{ opacity: 0.7, marginTop: 6 }}>
                 Aún no hay reacciones.
               </Text>
-            ) : null}
+            ) : (
+              <View style={{ marginTop: 2, gap: 8 }}>
+                {reactorsSorted.map(r => {
+                  const meta = r.key
+                    ? REACTIONS.find(m => m.key === r.key)
+                    : undefined;
+                  const adj = meta ? NORMALIZE[meta.key] || {} : undefined;
+                  return (
+                    <View
+                      key={`all-${r.userId}`}
+                      style={{ flexDirection: 'row', alignItems: 'center' }}
+                    >
+                      {meta ? (
+                        <View style={[styles.iconCell, { marginRight: 4 }]}>
+                          <View style={styles.iconBox}>
+                            <View
+                              style={{
+                                transform: [
+                                  { scale: (adj?.scale ?? 1) * 0.85 },
+                                  { translateY: (adj?.dy ?? 0) * 0.85 },
+                                ],
+                              }}
+                            >
+                              <LottieView
+                                source={meta.lottie as LottieSource}
+                                autoPlay
+                                loop
+                                style={{ width: 24, height: 24 }}
+                              />
+                            </View>
+                          </View>
+                        </View>
+                      ) : null}
+                      <Text variant="bodyLarge" style={{ fontWeight: '600' }}>
+                        {r.name}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
           </View>
         ) : (
           <View style={styles.list}>
@@ -243,12 +451,32 @@ const ReactionBreakdownModal: React.FC<Props> = ({
                     </Text>
                   </View>
                   <Divider style={{ opacity: 0.3 }} />
-                  <Text
-                    variant="bodyMedium"
-                    style={{ opacity: 0.7, marginTop: 12 }}
-                  >
-                    (Aquí podrás listar usuarios cuando tengas esa data.)
-                  </Text>
+
+                  {/* Lista de usuarios por clave */}
+                  {reactorsSorted.length === 0 ? (
+                    <Text
+                      variant="bodyMedium"
+                      style={{ opacity: 0.7, marginTop: 12 }}
+                    >
+                      Nadie ha reaccionado aún.
+                    </Text>
+                  ) : (
+                    <View style={{ marginTop: 8, gap: 8 }}>
+                      {reactorsSorted.map(r => (
+                        <View
+                          key={`${tab}-${r.userId}`}
+                          style={{ flexDirection: 'row', alignItems: 'center' }}
+                        >
+                          <Text
+                            variant="bodyLarge"
+                            style={{ fontWeight: '600' }}
+                          >
+                            {r.name}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                 </>
               );
             })()}
@@ -260,28 +488,15 @@ const ReactionBreakdownModal: React.FC<Props> = ({
 };
 
 const styles = StyleSheet.create({
-  container: {
-    marginHorizontal: 16,
-    borderRadius: 16,
-    padding: 12,
-  },
-  tabsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 8,
-  },
+  container: { marginHorizontal: 16, borderRadius: 16, padding: 12 },
+  tabsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   tab: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  orderRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 8,
-  },
+  orderRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   orderChip: {
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -289,11 +504,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   list: { marginTop: 8 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
   iconCell: {
     width: 36,
     height: 32,

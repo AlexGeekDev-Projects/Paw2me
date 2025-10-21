@@ -31,7 +31,6 @@ export type RootStackParamList = {
   AppTabs: undefined;
   CreateAnimal: undefined; // flujo que abre el tab “+”
   AnimalDetail: { id: string };
-  CreatePost: { animalId?: string } | undefined;
 
   Login: undefined;
   Register: undefined;
@@ -41,6 +40,7 @@ export type RootStackParamList = {
 export type FeedStackParamList = {
   Feed: undefined;
   AnimalDetail: { id: string };
+  CreatePost: { animalId?: string } | undefined;
 };
 
 export type ExploreStackParamList = {
@@ -77,6 +77,11 @@ const FeedStackNavigator: React.FC = () => (
   <FeedStack.Navigator screenOptions={{ headerShown: false }}>
     <FeedStack.Screen name="Feed" component={FeedScreen} />
     <FeedStack.Screen name="AnimalDetail" component={AnimalDetailScreen} />
+    <FeedStack.Screen
+      name="CreatePost"
+      component={CreatePostScreen}
+      options={{ headerShown: false }}
+    />
   </FeedStack.Navigator>
 );
 
@@ -237,25 +242,6 @@ const RootNavigator: React.FC = () => {
             <RootStack.Screen
               name="AnimalDetail"
               component={AnimalDetailScreen}
-            />
-
-            {/* CreatePost con header Paper */}
-            <RootStack.Screen
-              name="CreatePost"
-              component={CreatePostScreen}
-              options={{
-                headerShown: true,
-                title: 'Nueva actualización',
-                header: ({ navigation, options }) => (
-                  <Appbar.Header
-                    mode="small"
-                    style={{ backgroundColor: theme.colors.background }}
-                  >
-                    <Appbar.BackAction onPress={navigation.goBack} />
-                    <Appbar.Content title={options.title} />
-                  </Appbar.Header>
-                ),
-              }}
             />
           </>
         ) : (
