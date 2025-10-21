@@ -20,13 +20,12 @@ import Loading from '@components/feedback/Loading';
 import Screen from '@components/layout/Screen';
 import PostCard from '@components/feed/PostCard';
 
+import { listPostsPublic, toPostVM } from '@services/postsService';
 import {
-  listPostsPublic,
-  getUserReacted,
-  countReactions,
-  toggleReaction,
-  toPostVM,
-} from '@services/postsService';
+  getUserReacted as getUserPostReacted,
+  countReactions as countPostReactions,
+  toggleReaction as togglePostReaction,
+} from '@services/postsReactionsService';
 
 import type { PostDoc, PostCardVM } from '@models/post';
 import { getAuth } from '@services/firebase';
@@ -89,7 +88,8 @@ const AnimatedPostItem: React.FC<{
 
 const FeedScreen: React.FC = () => {
   const theme = useTheme();
-  const uid = getAuth().currentUser?.uid ?? 'dev';
+  const auth = getAuth();
+  const uid = auth.currentUser?.uid ?? null;
 
   const [cards, setCards] = useState<PostCardVM[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -119,10 +119,13 @@ const FeedScreen: React.FC = () => {
       const vms: PostCardVM[] = await Promise.all(
         items.map(async (p: PostDoc) => {
           const [reacted, rc] = await Promise.all([
-            getUserReacted(p.id, uid),
-            countReactions(p.id),
+            uid ? getUserPostReacted(p.id, uid) : Promise.resolve(null),
+            countPostReactions(p.id),
           ]);
-          return toPostVM({ ...p, reactionCount: rc }, reacted);
+          return toPostVM(
+            { ...p, reactionCount: rc },
+            Boolean(reacted === 'love'),
+          );
         }),
       );
 
@@ -154,10 +157,13 @@ const FeedScreen: React.FC = () => {
       const vms: PostCardVM[] = await Promise.all(
         items.map(async (p: PostDoc) => {
           const [reacted, rc] = await Promise.all([
-            getUserReacted(p.id, uid),
-            countReactions(p.id),
+            uid ? getUserPostReacted(p.id, uid) : Promise.resolve(null),
+            countPostReactions(p.id),
           ]);
-          return toPostVM({ ...p, reactionCount: rc }, reacted);
+          return toPostVM(
+            { ...p, reactionCount: rc },
+            Boolean(reacted === 'love'),
+          );
         }),
       );
 
@@ -187,9 +193,12 @@ const FeedScreen: React.FC = () => {
     void fetchFirstPage();
   }, [fetchFirstPage]);
 
-  /* Reacción optimista con Reconcilio */
+  /* Reacción optimista + reconcilio */
   const onToggleReact = useCallback(
     async (postId: string, next: boolean) => {
+      // Guard: las reglas requieren estar logueado
+      if (!uid) return;
+
       setCards((prev: PostCardVM[]) =>
         prev.map((it: PostCardVM) =>
           it.id === postId
@@ -202,8 +211,8 @@ const FeedScreen: React.FC = () => {
         ),
       );
 
-      const final = await toggleReaction(postId, uid);
-      const rc = await countReactions(postId);
+      const final = await togglePostReaction(postId, uid);
+      const rc = await countPostReactions(postId);
 
       setCards((prev: PostCardVM[]) =>
         prev.map((it: PostCardVM) =>

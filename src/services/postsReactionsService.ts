@@ -1,27 +1,29 @@
-// src/services/postsReactionsService.ts
+// src/services/postReactionsService.ts
 import {
   getFirestore,
-  collection,
   doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  deleteDoc,
-  query,
+  collection,
   where,
+  getDoc,
+  query,
   orderBy,
   limit,
   nowTs,
-  startAfter,
   type FirebaseFirestoreTypes,
 } from '@services/firebase';
 
-export type ReactionKey = 'like' | 'love' | 'happy' | 'sad' | 'wow' | 'angry';
+export type PostReactionKey =
+  | 'like'
+  | 'love'
+  | 'happy'
+  | 'sad'
+  | 'wow'
+  | 'angry';
 
-export type ReactionDoc = Readonly<{
+export type PostReactionDoc = Readonly<{
   userId: string;
   postId: string;
-  key: ReactionKey;
+  key: PostReactionKey;
   createdAt:
     | FirebaseFirestoreTypes.FieldValue
     | FirebaseFirestoreTypes.Timestamp;
@@ -30,67 +32,69 @@ export type ReactionDoc = Readonly<{
     | FirebaseFirestoreTypes.Timestamp;
 }>;
 
-export type ReactionCountsDoc = Readonly<
-  Record<ReactionKey, number> & {
-    updatedAt:
-      | FirebaseFirestoreTypes.FieldValue
-      | FirebaseFirestoreTypes.Timestamp;
-  }
->;
+export type PostReactionCountsDoc = Readonly<{
+  like: number;
+  love: number;
+  happy: number;
+  sad: number;
+  wow: number;
+  angry: number;
+  updatedAt:
+    | FirebaseFirestoreTypes.FieldValue
+    | FirebaseFirestoreTypes.Timestamp;
+}>;
 
 type Unsub = () => void;
 type Order = 'asc' | 'desc';
 
-/* ───────────── Refs tipados ───────────── */
-const postRef = (
-  postId: string,
-): FirebaseFirestoreTypes.DocumentReference<FirebaseFirestoreTypes.DocumentData> =>
-  doc(getFirestore(), 'posts', postId);
+type PostReactionCountsData = Readonly<{
+  like: number;
+  love: number;
+  happy: number;
+  sad: number;
+  wow: number;
+  angry: number;
+}>;
 
+/* ──────────────────────────────
+ * Refs
+ * ────────────────────────────── */
 const reactionsColRef = (
   postId: string,
-): FirebaseFirestoreTypes.CollectionReference<ReactionDoc> =>
+): FirebaseFirestoreTypes.CollectionReference<PostReactionDoc> =>
   collection(
     getFirestore(),
     'posts',
     postId,
     'reactions',
-  ) as FirebaseFirestoreTypes.CollectionReference<ReactionDoc>;
+  ) as FirebaseFirestoreTypes.CollectionReference<PostReactionDoc>;
 
 const reactionDocRef = (
   postId: string,
   userId: string,
-): FirebaseFirestoreTypes.DocumentReference<ReactionDoc> =>
+): FirebaseFirestoreTypes.DocumentReference<PostReactionDoc> =>
   doc(
     getFirestore(),
     'posts',
     postId,
     'reactions',
     userId,
-  ) as FirebaseFirestoreTypes.DocumentReference<ReactionDoc>;
+  ) as FirebaseFirestoreTypes.DocumentReference<PostReactionDoc>;
 
 const countsDocRef = (
   postId: string,
-): FirebaseFirestoreTypes.DocumentReference<ReactionCountsDoc> =>
+): FirebaseFirestoreTypes.DocumentReference<PostReactionCountsDoc> =>
   doc(
     getFirestore(),
     'posts',
     postId,
     'meta',
     'reactionCounts',
-  ) as FirebaseFirestoreTypes.DocumentReference<ReactionCountsDoc>;
+  ) as FirebaseFirestoreTypes.DocumentReference<PostReactionCountsDoc>;
 
-/* ───────────── Utils ───────────── */
-const EMPTY: ReactionCountsDoc = {
-  like: 0,
-  love: 0,
-  happy: 0,
-  sad: 0,
-  wow: 0,
-  angry: 0,
-  updatedAt: nowTs(),
-};
-
+/* ──────────────────────────────
+ * Utils
+ * ────────────────────────────── */
 const tsToMillis = (
   v: FirebaseFirestoreTypes.Timestamp | FirebaseFirestoreTypes.FieldValue,
 ): number =>
@@ -98,74 +102,151 @@ const tsToMillis = (
     ? (v as FirebaseFirestoreTypes.Timestamp).toMillis()
     : 0;
 
-const sortByUpdatedAt = <T extends { updatedAt: ReactionDoc['updatedAt'] }>(
+const sortByUpdatedAt = <T extends { updatedAt: PostReactionDoc['updatedAt'] }>(
   arr: readonly T[],
-  order: Order,
+  dir: Order,
 ): T[] =>
   [...arr].sort((a, b) => {
     const am = tsToMillis(a.updatedAt);
     const bm = tsToMillis(b.updatedAt);
-    return order === 'asc' ? am - bm : bm - am;
+    return dir === 'asc' ? am - bm : bm - am;
   });
 
-/* ───────────── Lecturas/escuchas ───────────── */
-export function listenPostReactionCounts(
+const isPostKey = (k: unknown): k is PostReactionKey =>
+  k === 'like' ||
+  k === 'love' ||
+  k === 'happy' ||
+  k === 'sad' ||
+  k === 'wow' ||
+  k === 'angry';
+
+/* ──────────────────────────────
+ * Listeners (con fallback sin índice compuesto)
+ * ────────────────────────────── */
+
+/** Todos los reactores (cualquier clave) */
+export function listenPostReactorsAll(
   postId: string,
-  cb: (counts: ReactionCountsDoc | null) => void,
+  cb: (items: ReadonlyArray<PostReactionDoc & { id: string }>) => void,
+  opts?: { limit?: number; order?: Order },
 ): Unsub {
-  const ref = countsDocRef(postId);
-  return ref.onSnapshot(
-    (snap: FirebaseFirestoreTypes.DocumentSnapshot<ReactionCountsDoc>) => {
-      if (!snap.exists()) {
-        cb(null);
-        return;
-      }
-      const d = snap.data();
-      cb({
-        like: (d?.like ?? 0) | 0,
-        love: (d?.love ?? 0) | 0,
-        happy: (d?.happy ?? 0) | 0,
-        sad: (d?.sad ?? 0) | 0,
-        wow: (d?.wow ?? 0) | 0,
-        angry: (d?.angry ?? 0) | 0,
-        updatedAt: d?.updatedAt ?? nowTs(),
-      });
-    },
-  );
+  const n: number =
+    typeof opts?.limit === 'number' && opts.limit > 0 ? opts.limit : 120;
+  const dir: Order = opts?.order === 'asc' ? 'asc' : 'desc';
+
+  const col = reactionsColRef(postId);
+  let currentUnsub: Unsub | null = null;
+
+  const subscribe = (withOrder: boolean): void => {
+    const qRef: FirebaseFirestoreTypes.Query<PostReactionDoc> = withOrder
+      ? query(col, orderBy('updatedAt'), limit(n))
+      : query(col, limit(n));
+
+    currentUnsub = qRef.onSnapshot(
+      (snap: FirebaseFirestoreTypes.QuerySnapshot<PostReactionDoc>) => {
+        const mapped = snap.docs.map(
+          (
+            d: FirebaseFirestoreTypes.QueryDocumentSnapshot<PostReactionDoc>,
+          ): PostReactionDoc & { id: string } => ({ id: d.id, ...d.data() }),
+        );
+        const ordered = sortByUpdatedAt(mapped, dir);
+        cb(ordered);
+      },
+      // Fallback si falta índice compuesto
+      (_err: Error) => {
+        if (withOrder) subscribe(false);
+        else cb([]);
+      },
+    );
+  };
+
+  subscribe(true);
+  return () => currentUnsub?.();
 }
 
-export function listenPostUserReaction(
+/** Reactores por clave */
+export function listenPostReactorsByKey(
+  postId: string,
+  key: PostReactionKey,
+  cb: (items: ReadonlyArray<PostReactionDoc & { id: string }>) => void,
+  opts?: { limit?: number; order?: Order },
+): Unsub {
+  const n: number =
+    typeof opts?.limit === 'number' && opts.limit > 0 ? opts.limit : 80;
+  const dir: Order = opts?.order === 'asc' ? 'asc' : 'desc';
+
+  const col = reactionsColRef(postId);
+  let currentUnsub: Unsub | null = null;
+
+  const subscribe = (withOrder: boolean): void => {
+    const qRef: FirebaseFirestoreTypes.Query<PostReactionDoc> = withOrder
+      ? query(col, where('key', '==', key), orderBy('updatedAt'), limit(n))
+      : query(col, where('key', '==', key), limit(n));
+
+    currentUnsub = qRef.onSnapshot(
+      (snap: FirebaseFirestoreTypes.QuerySnapshot<PostReactionDoc>) => {
+        const mapped = snap.docs.map(
+          (
+            d: FirebaseFirestoreTypes.QueryDocumentSnapshot<PostReactionDoc>,
+          ): PostReactionDoc & { id: string } => ({ id: d.id, ...d.data() }),
+        );
+        const ordered = sortByUpdatedAt(mapped, dir);
+        cb(ordered);
+      },
+      (_err: Error) => {
+        if (withOrder) subscribe(false);
+        else cb([]);
+      },
+    );
+  };
+
+  subscribe(true);
+  return () => currentUnsub?.();
+}
+
+/* ──────────────────────────────
+ * Lecturas helpers
+ * ────────────────────────────── */
+
+export async function getUserReacted(
   postId: string,
   userId: string,
-  cb: (key: ReactionKey | null) => void,
-): Unsub {
-  const ref = reactionDocRef(postId, userId);
-  return ref.onSnapshot(
-    (snap: FirebaseFirestoreTypes.DocumentSnapshot<ReactionDoc>) => {
-      if (!snap.exists()) {
-        cb(null);
-        return;
-      }
-      const k = snap.data()?.key;
-      cb(
-        k === 'like' ||
-          k === 'love' ||
-          k === 'happy' ||
-          k === 'sad' ||
-          k === 'wow' ||
-          k === 'angry'
-          ? (k as ReactionKey)
-          : null,
-      );
-    },
-  );
+): Promise<PostReactionKey | null> {
+  const snap = await getDoc(reactionDocRef(postId, userId));
+  if (!snap.exists()) return null;
+  const k = (snap.data()?.key ?? null) as unknown;
+  return isPostKey(k) ? k : null;
 }
 
-/* ───────────── Escritura con transacción ───────────── */
-export async function setPostUserReaction(params: {
+/** Suma total desde meta; si no hay doc, 0 */
+export async function countReactions(postId: string): Promise<number> {
+  const snap = await getDoc(countsDocRef(postId));
+
+  // RNFirebase no estrecha con .exists(): hacemos la normalización manual.
+  const data: PostReactionCountsData | undefined = snap.exists()
+    ? (snap.data() as PostReactionCountsData | undefined)
+    : undefined;
+
+  const d: PostReactionCountsData = data ?? {
+    like: 0,
+    love: 0,
+    happy: 0,
+    sad: 0,
+    wow: 0,
+    angry: 0,
+  };
+
+  return d.like + d.love + d.happy + d.sad + d.wow + d.angry;
+}
+
+/* ──────────────────────────────
+ * Escritura transaccional
+ * ────────────────────────────── */
+
+export async function setPostReaction(params: {
   postId: string;
   userId: string;
-  next: ReactionKey | null;
+  next: PostReactionKey | null;
 }): Promise<void> {
   const { postId, userId, next } = params;
 
@@ -173,20 +254,21 @@ export async function setPostUserReaction(params: {
     async (tx: FirebaseFirestoreTypes.Transaction) => {
       const rRef = reactionDocRef(postId, userId);
       const cRef = countsDocRef(postId);
-      const pRef = postRef(postId);
 
       // previa
-      const prevSnap: FirebaseFirestoreTypes.DocumentSnapshot<ReactionDoc> =
+      const prevSnap: FirebaseFirestoreTypes.DocumentSnapshot<PostReactionDoc> =
         await tx.get(rRef);
-      const prev = prevSnap.exists() ? (prevSnap.data() as ReactionDoc) : null;
+      const prev = prevSnap.exists()
+        ? (prevSnap.data() as PostReactionDoc)
+        : null;
 
       if ((prev?.key ?? null) === next) return; // no-op
 
-      // contadores
-      const countsSnap: FirebaseFirestoreTypes.DocumentSnapshot<ReactionCountsDoc> =
+      // contadores actuales
+      const countsSnap: FirebaseFirestoreTypes.DocumentSnapshot<PostReactionCountsDoc> =
         await tx.get(cRef);
       const base = countsSnap.exists()
-        ? (countsSnap.data() as ReactionCountsDoc)
+        ? (countsSnap.data() as PostReactionCountsDoc)
         : undefined;
 
       let like = (base?.like ?? 0) | 0;
@@ -196,7 +278,7 @@ export async function setPostUserReaction(params: {
       let wow = (base?.wow ?? 0) | 0;
       let angry = (base?.angry ?? 0) | 0;
 
-      const dec = (k: ReactionKey) => {
+      const dec = (k: PostReactionKey | undefined): void => {
         if (k === 'like' && like > 0) like -= 1;
         if (k === 'love' && love > 0) love -= 1;
         if (k === 'happy' && happy > 0) happy -= 1;
@@ -204,7 +286,7 @@ export async function setPostUserReaction(params: {
         if (k === 'wow' && wow > 0) wow -= 1;
         if (k === 'angry' && angry > 0) angry -= 1;
       };
-      const inc = (k: ReactionKey) => {
+      const inc = (k: PostReactionKey | undefined): void => {
         if (k === 'like') like += 1;
         if (k === 'love') love += 1;
         if (k === 'happy') happy += 1;
@@ -213,126 +295,50 @@ export async function setPostUserReaction(params: {
         if (k === 'angry') angry += 1;
       };
 
-      if (prev?.key) dec(prev.key);
-      if (next) inc(next);
+      dec(prev?.key);
+      inc(next ?? undefined);
 
       const now = nowTs();
 
       // guarda contadores
       tx.set(
         cRef,
-        { like, love, happy, sad, wow, angry, updatedAt: now },
+        {
+          like,
+          love,
+          happy,
+          sad,
+          wow,
+          angry,
+          updatedAt: now,
+        } satisfies PostReactionCountsDoc,
         { merge: true },
       );
 
-      // guarda/elimina reacción de usuario
+      // guarda/elimina reacción
       if (next) {
-        const payload: ReactionDoc = {
+        const payload: PostReactionDoc = {
           userId,
           postId,
           key: next,
-          createdAt: (prev?.createdAt ?? now) as ReactionDoc['createdAt'],
-          updatedAt: now as ReactionDoc['updatedAt'],
+          createdAt: (prev?.createdAt ?? now) as PostReactionDoc['createdAt'],
+          updatedAt: now as PostReactionDoc['updatedAt'],
         };
         tx.set(rRef, payload);
       } else {
         tx.delete(rRef);
       }
-
-      // write-touch opcional por si quieres ordenar por updatedAt en el post
-      tx.set(pRef, { updatedAt: now }, { merge: true });
     },
   );
 }
 
-/* ───────────── Reactores (para el modal) ───────────── */
-export function listenPostReactorsAll(
+/** Helper para UI actual: conmuta 'love' y devuelve flag final */
+export async function toggleReaction(
   postId: string,
-  cb: (items: ReadonlyArray<ReactionDoc & { id: string }>) => void,
-  opts?: { limit?: number; order?: Order },
-): Unsub {
-  const n =
-    typeof opts?.limit === 'number' && opts.limit > 0 ? opts.limit : 120;
-  const dir: Order = opts?.order === 'asc' ? 'asc' : 'desc';
-
-  const col = reactionsColRef(postId);
-  let unsub: Unsub | null = null;
-
-  const subscribe = (withOrder: boolean): void => {
-    const qRef: FirebaseFirestoreTypes.Query<ReactionDoc> = withOrder
-      ? query(col, orderBy('updatedAt'), limit(n))
-      : query(col, limit(n));
-
-    unsub = qRef.onSnapshot(
-      (snap: FirebaseFirestoreTypes.QuerySnapshot<ReactionDoc>) => {
-        const mapped = snap.docs.map(
-          (
-            d: FirebaseFirestoreTypes.QueryDocumentSnapshot<ReactionDoc>,
-          ): ReactionDoc & { id: string } => ({ id: d.id, ...d.data() }),
-        );
-        cb(sortByUpdatedAt(mapped, dir));
-      },
-      // fallback sin índice
-      () => {
-        if (withOrder) subscribe(false);
-        else cb([]);
-      },
-    );
-  };
-
-  subscribe(true);
-  return () => unsub?.();
-}
-
-export function listenPostReactorsByKey(
-  postId: string,
-  key: ReactionKey,
-  cb: (items: ReadonlyArray<ReactionDoc & { id: string }>) => void,
-  opts?: { limit?: number; order?: Order },
-): Unsub {
-  const n = typeof opts?.limit === 'number' && opts.limit > 0 ? opts.limit : 80;
-  const dir: Order = opts?.order === 'asc' ? 'asc' : 'desc';
-
-  const col = reactionsColRef(postId);
-  let unsub: Unsub | null = null;
-
-  const subscribe = (withOrder: boolean): void => {
-    const qRef: FirebaseFirestoreTypes.Query<ReactionDoc> = withOrder
-      ? query(col, where('key', '==', key), orderBy('updatedAt'), limit(n))
-      : query(col, where('key', '==', key), limit(n));
-
-    unsub = qRef.onSnapshot(
-      (snap: FirebaseFirestoreTypes.QuerySnapshot<ReactionDoc>) => {
-        const mapped = snap.docs.map(
-          (
-            d: FirebaseFirestoreTypes.QueryDocumentSnapshot<ReactionDoc>,
-          ): ReactionDoc & { id: string } => ({ id: d.id, ...d.data() }),
-        );
-        cb(sortByUpdatedAt(mapped, dir));
-      },
-      () => {
-        if (withOrder) subscribe(false);
-        else cb([]);
-      },
-    );
-  };
-
-  subscribe(true);
-  return () => unsub?.();
-}
-
-/* ───────────── (Opcional) warmup para posts antiguos ───────────── */
-export async function warmupPostCounts(postId: string): Promise<void> {
-  const col = reactionsColRef(postId);
-  const snap = await getDocs(query(col, limit(1000)));
-  const counts = { like: 0, love: 0, happy: 0, sad: 0, wow: 0, angry: 0 };
-  snap.forEach(d => {
-    const k = (d.data().key ?? '') as ReactionKey;
-    if (k in counts) (counts as any)[k] += 1;
-  });
-  await setDoc(
-    countsDocRef(postId),
-    { ...counts, updatedAt: nowTs() } as ReactionCountsDoc,
-    { merge: true },
-  );
+  userId: string,
+): Promise<boolean> {
+  const prev = await getUserReacted(postId, userId);
+  const next = prev === 'love' ? null : ('love' as const);
+  await setPostReaction({ postId, userId, next });
+  return next === 'love';
 }
