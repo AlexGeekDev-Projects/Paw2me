@@ -1,3 +1,4 @@
+// src/components/feed/PostCard.tsx
 import React, {
   memo,
   useEffect,
@@ -17,7 +18,8 @@ import {
 } from 'react-native';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { Card, Text, useTheme } from 'react-native-paper';
-import ReactionFooter from '@components/reactions/ReactionFooter';
+// 👇 usa el footer para posts (no toca el de Explorer)
+import ReactionFooter from '@components/reactions/ReactionFooterPosts';
 import type { PostCardVM } from '@models/post';
 import {
   clampAspectRatio,
@@ -55,7 +57,7 @@ const PostCard: React.FC<Props> = ({ data, onToggleReact }) => {
   const cardW = useMemo(() => winW - 24, [winW]);
   const dpr = PixelRatio.get();
 
-  // Medios combinados: primero imágenes luego videos (puedes cambiar el orden)
+  // Medios combinados: primero imágenes luego videos
   const images = Array.isArray(data.imageUrls) ? data.imageUrls : [];
   const videos = Array.isArray(data.videoUrls) ? data.videoUrls! : [];
   const media: ReadonlyArray<{ type: 'image' | 'video'; url: string }> = [
@@ -252,16 +254,14 @@ const PostCard: React.FC<Props> = ({ data, onToggleReact }) => {
         </View>
       ) : null}
 
-      {/* Footer de reacciones reutilizado */}
+      {/* Footer de reacciones (posts) */}
       <View style={styles.topBorder} />
       <ReactionFooter
         id={data.id}
         current={data.reactedByMe ? 'love' : null}
-        counts={{ love: data.reactionCount }} // si luego persistes meta, puedes pasar per-key
+        counts={{ love: data.reactionCount }}
         availableKeys={['like', 'love', 'happy', 'sad', 'wow', 'angry']}
-        scope="posts" // 👈 importante
         onReact={async (id, key, active) => {
-          // hoy sólo conmuta "love"; puedes abrir más cuando tengas UI para elegir.
           if (key !== 'love') return;
           onToggleReact(id, active);
         }}
