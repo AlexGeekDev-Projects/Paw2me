@@ -1,6 +1,7 @@
 // src/services/postReactionsService.ts
 import {
   getFirestore,
+  getAuth,
   doc,
   collection,
   where,
@@ -119,6 +120,14 @@ const isPostKey = (k: unknown): k is PostReactionKey =>
   k === 'sad' ||
   k === 'wow' ||
   k === 'angry';
+
+function assertSelf(userId: string): string {
+  const auth = getAuth();
+  const uid = auth.currentUser?.uid ?? '';
+  if (!uid) throw new Error('auth/unauthenticated');
+  if (uid !== userId) throw new Error('auth/mismatch');
+  return uid;
+}
 
 /* ──────────────────────────────
  * Listeners (con fallback sin índice compuesto)
@@ -250,6 +259,9 @@ export async function setPostReaction(params: {
 }): Promise<void> {
   const { postId, userId, next } = params;
 
+  // Garantiza que escribimos como nosotros mismos (coincide con reglas)
+  assertSelf(userId);
+
   await getFirestore().runTransaction(
     async (tx: FirebaseFirestoreTypes.Transaction) => {
       const rRef = reactionDocRef(postId, userId);
@@ -332,7 +344,7 @@ export async function setPostReaction(params: {
   );
 }
 
-/** Helper para UI actual: conmuta 'love' y devuelve flag final */
+/** Helper para UI actual: conmuta 'love' y devuelve flag final (true si queda 'love') */
 export async function toggleReaction(
   postId: string,
   userId: string,
@@ -341,4 +353,11 @@ export async function toggleReaction(
   const next = prev === 'love' ? null : ('love' as const);
   await setPostReaction({ postId, userId, next });
   return next === 'love';
+}
+
+/** Variante segura: usa el UID del usuario autenticado */
+export async function toggleMyReaction(postId: string): Promise<boolean> {
+  const uid = getAuth().currentUser?.uid ?? '';
+  if (!uid) throw new Error('auth/unauthenticated');
+  return toggleReaction(postId, uid);
 }

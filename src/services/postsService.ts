@@ -11,7 +11,6 @@ import {
   limit,
   getDocs,
   getDoc,
-  deleteDoc,
   startAfter,
   type FirebaseFirestoreTypes,
 } from '@services/firebase';
@@ -34,10 +33,6 @@ export type NewPostInput = Readonly<{
  * Helpers Firestore / utilidades puramente tipadas
  * ───────────────────────────────────────────────────────────── */
 const postsColRef = () => collection(getFirestore(), 'posts');
-const reactionsColRef = (postId: string) =>
-  collection(getFirestore(), 'posts', postId, 'reactions');
-const reactionDocRef = (postId: string, uid: string) =>
-  doc(getFirestore(), 'posts', postId, 'reactions', uid);
 
 const toMillisNumber = (v: unknown): number | null => {
   if (typeof v === 'number') return v;
@@ -107,7 +102,7 @@ type PostDocRaw = Readonly<{
   authorUid?: unknown;
   content?: unknown;
   imageUrls?: unknown;
-  videoUrls?: unknown; // ← NUEVO
+  videoUrls?: unknown;
   status?: unknown;
   reactionCount?: unknown;
   commentCount?: unknown;
@@ -132,7 +127,7 @@ function mapSnapToPost(
       : toMillisNumber(data.updatedAt)) ?? createdAtMs;
 
   const imageUrls = isStringArray(data.imageUrls) ? data.imageUrls : [];
-  const videoUrls = isStringArray(data.videoUrls) ? data.videoUrls : []; // ← NUEVO
+  const videoUrls = isStringArray(data.videoUrls) ? data.videoUrls : [];
 
   const reactionCount =
     typeof data.reactionCount === 'number' ? data.reactionCount : 0;
@@ -153,7 +148,7 @@ function mapSnapToPost(
     authorUid,
     content,
     imageUrls,
-    videoUrls, // ← NUEVO
+    videoUrls,
     status,
     reactionCount,
     commentCount,
@@ -244,43 +239,6 @@ export async function listPostsPublic(
 
     return { items, nextCursor };
   }
-}
-
-/* ─────────────────────────────────────────────────────────────
- * Reacciones (subcolección posts/{id}/reactions/{uid})
- * ───────────────────────────────────────────────────────────── */
-type ReactionDoc = Readonly<{
-  reactedAt:
-    | FirebaseFirestoreTypes.FieldValue
-    | FirebaseFirestoreTypes.Timestamp;
-}>;
-
-export async function getUserReacted(
-  postId: string,
-  uid: string,
-): Promise<boolean> {
-  const r = await getDoc(reactionDocRef(postId, uid));
-  return r.exists();
-}
-
-export async function countReactions(postId: string): Promise<number> {
-  const r = await getDocs(reactionsColRef(postId));
-  return r.size;
-}
-
-export async function toggleReaction(
-  postId: string,
-  uid: string,
-): Promise<boolean> {
-  const ref = reactionDocRef(postId, uid);
-  const s = await getDoc(ref);
-  if (s.exists()) {
-    await deleteDoc(ref);
-    return false;
-  }
-  const payload: ReactionDoc = { reactedAt: nowTs() };
-  await setDoc(ref, payload);
-  return true;
 }
 
 /* ─────────────────────────────────────────────────────────────

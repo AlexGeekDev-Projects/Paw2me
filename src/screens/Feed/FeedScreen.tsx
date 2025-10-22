@@ -1,11 +1,4 @@
-// src/screens/FeedScreen.tsx
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   FlatList,
   RefreshControl,
@@ -19,6 +12,7 @@ import { ActivityIndicator, Button, Text, useTheme } from 'react-native-paper';
 import Loading from '@components/feedback/Loading';
 import Screen from '@components/layout/Screen';
 import PostCard from '@components/feed/PostCard';
+import FeedComposerBar from '@components/feed/FeedComposerBar';
 
 import { listPostsPublic, toPostVM } from '@services/postsService';
 import {
@@ -28,7 +22,8 @@ import {
 } from '@services/postsReactionsService';
 
 import type { PostDoc, PostCardVM } from '@models/post';
-import { getAuth } from '@services/firebase';
+import { getAuth, getFirestore, doc, getDoc } from '@services/firebase';
+import type { FirebaseFirestoreTypes } from '@services/firebase';
 
 const PAGE_SIZE = 20;
 const LOAD_MORE_COOLDOWN_MS = 900;
@@ -52,12 +47,35 @@ function normalizePostsPage(res: PostsPage): {
   return { items: res.items, nextCursor: res.nextCursor ?? null };
 }
 
-/* Tarjeta animada */
+/* Autor light */
+type UserLight = Readonly<{
+  uid: string;
+  displayName?: string;
+  fullName?: string;
+  username?: string;
+  photoURL?: string;
+}>;
+const userRef = (uid: string) =>
+  doc(
+    getFirestore(),
+    'users',
+    uid,
+  ) as FirebaseFirestoreTypes.DocumentReference<UserLight>;
+
+const displayFromUser = (u: UserLight | undefined | null): string => {
+  if (u?.fullName && u.fullName.trim()) return u.fullName;
+  if (u?.displayName && u.displayName.trim()) return u.displayName;
+  if (u?.username && u.username.trim()) return u.username;
+  return 'Usuario';
+};
+
+/* Item animado */
 const AnimatedPostItem: React.FC<{
   item: PostCardVM;
   index: number;
-  onToggleReact: (postId: string, next: boolean) => void;
-}> = ({ item, index, onToggleReact }) => {
+  author?: Readonly<{ name: string; photoURL?: string }>;
+  onToggleReact: (postId: string, next: boolean) => void | Promise<void>;
+}> = ({ item, index, author, onToggleReact }) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(8)).current;
 
@@ -81,7 +99,11 @@ const AnimatedPostItem: React.FC<{
 
   return (
     <Animated.View style={{ opacity, transform: [{ translateY }] }}>
-      <PostCard data={item} onToggleReact={onToggleReact} />
+      {author ? (
+        <PostCard data={item} author={author} onToggleReact={onToggleReact} />
+      ) : (
+        <PostCard data={item} onToggleReact={onToggleReact} />
+      )}
     </Animated.View>
   );
 };
@@ -92,6 +114,12 @@ const FeedScreen: React.FC = () => {
   const uid = auth.currentUser?.uid ?? null;
 
   const [cards, setCards] = useState<PostCardVM[]>([]);
+  const [authorByPostId, setAuthorByPostId] = useState<
+    Record<string, Readonly<{ name: string; photoURL?: string }>>
+  >({});
+  const [me, setMe] = useState<Readonly<{ name?: string; photoURL?: string }>>(
+    {},
+  );
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
@@ -101,6 +129,63 @@ const FeedScreen: React.FC = () => {
   const listRef = useRef<FlatList<PostCardVM>>(null);
   const lastLoadMoreAtRef = useRef(0);
   const endReachedDuringMomentum = useRef(false);
+
+  // cargar mi usuario (para la barra de composer)
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!uid) {
+        if (alive) setMe({});
+        return;
+      }
+      const snap = await getDoc(userRef(uid));
+      const u = snap.exists() ? (snap.data() as UserLight) : undefined;
+      const name = displayFromUser(u ?? null);
+      const next: Readonly<{ name?: string; photoURL?: string }> = u?.photoURL
+        ? ({ name, photoURL: u.photoURL } as const)
+        : ({ name } as const);
+      if (alive) setMe(next);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [uid]);
+
+  // Cache por uid
+  const userCacheRef = useRef<Map<string, UserLight>>(new Map());
+  const resolveAuthorsFor = useCallback(async (posts: PostDoc[]) => {
+    const uids = Array.from(
+      new Set(
+        posts
+          .map(p => p.authorUid)
+          .filter((s): s is string => typeof s === 'string' && s.length > 0),
+      ),
+    );
+    const missing = uids.filter(id => !userCacheRef.current.has(id));
+    if (missing.length > 0) {
+      const snaps = await Promise.all(missing.map(id => getDoc(userRef(id))));
+      snaps.forEach(s => {
+        if (s.exists()) userCacheRef.current.set(s.id, s.data() as UserLight);
+        else userCacheRef.current.set(s.id, { uid: s.id } as UserLight);
+      });
+    }
+    const map: Record<
+      string,
+      Readonly<{ name: string; photoURL?: string }>
+    > = {};
+    for (const p of posts) {
+      const u =
+        typeof p.authorUid === 'string'
+          ? userCacheRef.current.get(p.authorUid)
+          : undefined;
+      const name = displayFromUser(u ?? null);
+      const photoURL = u?.photoURL;
+      map[p.id] = photoURL
+        ? ({ name, photoURL } as const)
+        : ({ name } as const);
+    }
+    setAuthorByPostId(prev => ({ ...prev, ...map }));
+  }, []);
 
   const prefetchFirstImages = useCallback((vms: PostCardVM[]) => {
     const urls = vms
@@ -129,6 +214,7 @@ const FeedScreen: React.FC = () => {
         }),
       );
 
+      await resolveAuthorsFor(items);
       prefetchFirstImages(vms);
       setCards(vms);
       setCursor(nextCursor);
@@ -136,9 +222,9 @@ const FeedScreen: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [uid, prefetchFirstImages]);
+  }, [uid, prefetchFirstImages, resolveAuthorsFor]);
 
-  /* Siguientes páginas */
+  /* Paginación */
   const fetchNextPage = useCallback(async () => {
     const now = Date.now();
     if (!hasMore || loadingMore) return;
@@ -167,14 +253,22 @@ const FeedScreen: React.FC = () => {
         }),
       );
 
+      await resolveAuthorsFor(items);
       prefetchFirstImages(vms);
-      setCards((prev: PostCardVM[]) => prev.concat(vms));
+      setCards(prev => prev.concat(vms));
       setCursor(nextCursor);
       setHasMore(Boolean(nextCursor));
     } finally {
       setLoadingMore(false);
     }
-  }, [cursor, hasMore, loadingMore, uid, prefetchFirstImages]);
+  }, [
+    cursor,
+    hasMore,
+    loadingMore,
+    uid,
+    prefetchFirstImages,
+    resolveAuthorsFor,
+  ]);
 
   const handleEndReached = useCallback(() => {
     if (endReachedDuringMomentum.current) return;
@@ -196,11 +290,10 @@ const FeedScreen: React.FC = () => {
   /* Reacción optimista + reconcilio */
   const onToggleReact = useCallback(
     async (postId: string, next: boolean) => {
-      // Guard: las reglas requieren estar logueado
       if (!uid) return;
 
-      setCards((prev: PostCardVM[]) =>
-        prev.map((it: PostCardVM) =>
+      setCards(prev =>
+        prev.map(it =>
           it.id === postId
             ? {
                 ...it,
@@ -214,8 +307,8 @@ const FeedScreen: React.FC = () => {
       const final = await togglePostReaction(postId, uid);
       const rc = await countPostReactions(postId);
 
-      setCards((prev: PostCardVM[]) =>
-        prev.map((it: PostCardVM) =>
+      setCards(prev =>
+        prev.map(it =>
           it.id === postId
             ? { ...it, reactedByMe: final, reactionCount: rc }
             : it,
@@ -227,18 +320,35 @@ const FeedScreen: React.FC = () => {
 
   /* Render */
   const renderItem: ListRenderItem<PostCardVM> = useCallback(
-    ({ item, index }) => (
-      <AnimatedPostItem
-        item={item}
-        index={index}
-        onToggleReact={onToggleReact}
-      />
-    ),
-    [onToggleReact],
+    ({ item, index }) => {
+      const author = authorByPostId[item.id];
+      return (
+        <AnimatedPostItem
+          item={item}
+          index={index}
+          {...(author ? ({ author } as const) : {})}
+          onToggleReact={onToggleReact}
+        />
+      );
+    },
+    [onToggleReact, authorByPostId],
   );
+
+  // acción del composer (navega a crear post)
+  const onComposerPress = useCallback(() => {
+    // ajusta al nombre real de tu ruta si es distinto
+    // navigation.navigate('CreatePost');
+  }, []);
 
   return (
     <Screen>
+      {/* Composer estilo Facebook */}
+      <FeedComposerBar
+        {...(me.name ? ({ name: me.name } as const) : {})}
+        {...(me.photoURL ? ({ photoURL: me.photoURL } as const) : {})}
+        onPress={onComposerPress}
+      />
+
       {loading ? (
         <Loading variant="skeleton-card-list" count={6} />
       ) : cards.length === 0 ? (
@@ -256,7 +366,7 @@ const FeedScreen: React.FC = () => {
           </Text>
           <Button
             mode="contained"
-            onPress={() => {}}
+            onPress={onComposerPress}
             style={{ marginTop: 8 }}
             icon="plus"
           >
@@ -267,7 +377,7 @@ const FeedScreen: React.FC = () => {
         <FlatList
           ref={listRef}
           data={cards}
-          keyExtractor={(item: PostCardVM) => item.id}
+          keyExtractor={it => it.id}
           renderItem={renderItem}
           ListFooterComponent={
             loadingMore ? (
@@ -290,8 +400,8 @@ const FeedScreen: React.FC = () => {
           }}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{
-            paddingTop: 12,
-            paddingHorizontal: 12,
+            paddingTop: 8,
+            paddingHorizontal: 0,
             paddingBottom: 96,
           }}
           removeClippedSubviews
