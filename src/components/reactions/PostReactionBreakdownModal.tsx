@@ -23,7 +23,7 @@ import {
   listenPostReactorsByKey,
   type PostReactionDoc,
   type PostReactionKey,
-} from '@services/postsReactionsService'; // ← nombre correcto
+} from '@services/postReactionsService'; // ← nombre correcto
 
 type Props = Readonly<{
   visible: boolean;

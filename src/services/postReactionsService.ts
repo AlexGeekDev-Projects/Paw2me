@@ -132,8 +132,6 @@ function assertSelf(userId: string): string {
 /* ──────────────────────────────
  * Listeners (con fallback sin índice compuesto)
  * ────────────────────────────── */
-
-/** Todos los reactores (cualquier clave) */
 export function listenPostReactorsAll(
   postId: string,
   cb: (items: ReadonlyArray<PostReactionDoc & { id: string }>) => void,
@@ -161,7 +159,6 @@ export function listenPostReactorsAll(
         const ordered = sortByUpdatedAt(mapped, dir);
         cb(ordered);
       },
-      // Fallback si falta índice compuesto
       (_err: Error) => {
         if (withOrder) subscribe(false);
         else cb([]);
@@ -173,7 +170,6 @@ export function listenPostReactorsAll(
   return () => currentUnsub?.();
 }
 
-/** Reactores por clave */
 export function listenPostReactorsByKey(
   postId: string,
   key: PostReactionKey,
@@ -216,7 +212,6 @@ export function listenPostReactorsByKey(
 /* ──────────────────────────────
  * Lecturas helpers
  * ────────────────────────────── */
-
 export async function getUserReacted(
   postId: string,
   userId: string,
@@ -227,31 +222,34 @@ export async function getUserReacted(
   return isPostKey(k) ? k : null;
 }
 
-/** Suma total desde meta; si no hay doc, 0 */
-export async function countReactions(postId: string): Promise<number> {
+/** Distribución completa por clave (si no hay doc, todo a 0) */
+export async function getReactionCounts(
+  postId: string,
+): Promise<PostReactionCountsData> {
   const snap = await getDoc(countsDocRef(postId));
-
-  // RNFirebase no estrecha con .exists(): hacemos la normalización manual.
   const data: PostReactionCountsData | undefined = snap.exists()
     ? (snap.data() as PostReactionCountsData | undefined)
     : undefined;
 
-  const d: PostReactionCountsData = data ?? {
-    like: 0,
-    love: 0,
-    happy: 0,
-    sad: 0,
-    wow: 0,
-    angry: 0,
+  return {
+    like: data?.like ?? 0,
+    love: data?.love ?? 0,
+    happy: data?.happy ?? 0,
+    sad: data?.sad ?? 0,
+    wow: data?.wow ?? 0,
+    angry: data?.angry ?? 0,
   };
+}
 
+/** Suma total desde meta; si no hay doc, 0 */
+export async function countReactions(postId: string): Promise<number> {
+  const d = await getReactionCounts(postId);
   return d.like + d.love + d.happy + d.sad + d.wow + d.angry;
 }
 
 /* ──────────────────────────────
  * Escritura transaccional
  * ────────────────────────────── */
-
 export async function setPostReaction(params: {
   postId: string;
   userId: string;
@@ -259,7 +257,6 @@ export async function setPostReaction(params: {
 }): Promise<void> {
   const { postId, userId, next } = params;
 
-  // Garantiza que escribimos como nosotros mismos (coincide con reglas)
   assertSelf(userId);
 
   await getFirestore().runTransaction(
@@ -344,18 +341,57 @@ export async function setPostReaction(params: {
   );
 }
 
-/** Helper para UI actual: conmuta 'love' y devuelve flag final (true si queda 'love') */
+/** Cambia a una clave concreta (o la quita si ya estaba). Devuelve la clave final o null. */
+export async function toggleReactionKey(
+  postId: string,
+  userId: string,
+  key: PostReactionKey,
+): Promise<PostReactionKey | null> {
+  const prev = await getUserReacted(postId, userId);
+  const next: PostReactionKey | null = prev === key ? null : key;
+  await setPostReaction({ postId, userId, next });
+  return next;
+}
+
+/** Variante que fija exactamente una clave (o la borra si pasas null). Devuelve la clave final o null. */
+export async function setReactionKey(
+  postId: string,
+  userId: string,
+  next: PostReactionKey | null,
+): Promise<PostReactionKey | null> {
+  await setPostReaction({ postId, userId, next });
+  return next;
+}
+
+/** Helpers con el usuario autenticado */
+export async function toggleMyReactionKey(
+  postId: string,
+  key: PostReactionKey,
+): Promise<boolean> {
+  const uid = getAuth().currentUser?.uid ?? '';
+  if (!uid) throw new Error('auth/unauthenticated');
+  const final = await toggleReactionKey(postId, uid, key);
+  return final === key;
+}
+
+export async function setMyReactionKey(
+  postId: string,
+  next: PostReactionKey | null,
+): Promise<PostReactionKey | null> {
+  const uid = getAuth().currentUser?.uid ?? '';
+  if (!uid) throw new Error('auth/unauthenticated');
+  return setReactionKey(postId, uid, next);
+}
+
+/** Compat: toggle de 'love' como antes */
 export async function toggleReaction(
   postId: string,
   userId: string,
 ): Promise<boolean> {
-  const prev = await getUserReacted(postId, userId);
-  const next = prev === 'love' ? null : ('love' as const);
-  await setPostReaction({ postId, userId, next });
-  return next === 'love';
+  const res = await toggleReactionKey(postId, userId, 'love');
+  return res === 'love';
 }
 
-/** Variante segura: usa el UID del usuario autenticado */
 export async function toggleMyReaction(postId: string): Promise<boolean> {
   const uid = getAuth().currentUser?.uid ?? '';
   if (!uid) throw new Error('auth/unauthenticated');

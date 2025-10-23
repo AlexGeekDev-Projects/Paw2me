@@ -1,30 +1,41 @@
+// src/screens/FeedScreen.tsx
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  FlatList,
-  RefreshControl,
-  View,
-  StyleSheet,
   Image,
   Animated,
+  FlatList as RNFlatList,
+  RefreshControl,
+  StyleSheet,
+  View,
 } from 'react-native';
 import type { ListRenderItem } from 'react-native';
 import { ActivityIndicator, Button, Text, useTheme } from 'react-native-paper';
+import { useNavigation } from '@react-navigation/native';
+
 import Loading from '@components/feedback/Loading';
 import Screen from '@components/layout/Screen';
 import PostCard from '@components/feed/PostCard';
+import FeedHeaderBanner from '@components/feed/FeedHeaderBanner';
 import FeedComposerBar from '@components/feed/FeedComposerBar';
 
 import { listPostsPublic, toPostVM } from '@services/postsService';
 import {
   getUserReacted as getUserPostReacted,
-  countReactions as countPostReactions,
-  toggleReaction as togglePostReaction,
-} from '@services/postsReactionsService';
+  getReactionCounts as getPostReactionCounts,
+  setMyReactionKey as setMyPostReactionKey,
+  countReactions as countPostReactions, // compat opcional
+  toggleReaction as togglePostReaction, // compat 'love'
+} from '@services/postReactionsService';
 
 import type { PostDoc, PostCardVM } from '@models/post';
 import { getAuth, getFirestore, doc, getDoc } from '@services/firebase';
 import type { FirebaseFirestoreTypes } from '@services/firebase';
 
+import type { ReactionCounts, UIReactionKey } from '@reactions/types';
+import type { PostReactionKey } from '@services/postReactionsService';
+
+/* ───────────────────────────────────────────────────────────── */
 const PAGE_SIZE = 20;
 const LOAD_MORE_COOLDOWN_MS = 900;
 
@@ -69,13 +80,27 @@ const displayFromUser = (u: UserLight | undefined | null): string => {
   return 'Usuario';
 };
 
-/* Item animado */
+/* Item animado tipado para PostCard (UIReactionKey) */
 const AnimatedPostItem: React.FC<{
   item: PostCardVM;
   index: number;
   author?: Readonly<{ name: string; photoURL?: string }>;
   onToggleReact: (postId: string, next: boolean) => void | Promise<void>;
-}> = ({ item, index, author, onToggleReact }) => {
+  currentReaction: UIReactionKey | null;
+  counts?: Partial<Record<UIReactionKey, number>>;
+  onReactKey: (
+    postId: string,
+    key: UIReactionKey | null,
+  ) => void | Promise<void>;
+}> = ({
+  item,
+  index,
+  author,
+  onToggleReact,
+  currentReaction,
+  counts,
+  onReactKey,
+}) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(8)).current;
 
@@ -99,19 +124,51 @@ const AnimatedPostItem: React.FC<{
 
   return (
     <Animated.View style={{ opacity, transform: [{ translateY }] }}>
-      {author ? (
-        <PostCard data={item} author={author} onToggleReact={onToggleReact} />
-      ) : (
-        <PostCard data={item} onToggleReact={onToggleReact} />
-      )}
+      <PostCard
+        data={item}
+        {...(author ? ({ author } as const) : {})}
+        onToggleReact={onToggleReact} // compat (tap corto -> love)
+        currentReaction={currentReaction}
+        {...(counts ? ({ counts } as const) : {})}
+        onReactKey={onReactKey}
+        availableKeys={['like', 'love', 'happy', 'sad', 'wow', 'angry']} // sin 'match' en UI
+      />
     </Animated.View>
   );
 };
 
+/* Pantalla */
 const FeedScreen: React.FC = () => {
   const theme = useTheme();
+  const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+
   const auth = getAuth();
   const uid = auth.currentUser?.uid ?? null;
+
+  // 🔸 Animated scroll para efectos del header
+  const scrollY = useRef(new Animated.Value(0)).current;
+
+  const bannerScale = scrollY.interpolate({
+    inputRange: [-120, 0],
+    outputRange: [1.1, 1],
+    extrapolate: 'clamp',
+  });
+  const bannerTranslateY = scrollY.interpolate({
+    inputRange: [-120, 0, 60],
+    outputRange: [-12, 0, -12],
+    extrapolate: 'clamp',
+  });
+  const bannerOpacity = scrollY.interpolate({
+    inputRange: [0, 60],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+  const notchFadeOpacity = scrollY.interpolate({
+    inputRange: [-40, 0],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
 
   const [cards, setCards] = useState<PostCardVM[]>([]);
   const [authorByPostId, setAuthorByPostId] = useState<
@@ -120,13 +177,22 @@ const FeedScreen: React.FC = () => {
   const [me, setMe] = useState<Readonly<{ name?: string; photoURL?: string }>>(
     {},
   );
+
+  // 🔒 Reacciones (estado por post) — PRESERVADO
+  const [currentByPostId, setCurrentByPostId] = useState<
+    Record<string, PostReactionKey | null>
+  >({});
+  const [countsByPostId, setCountsByPostId] = useState<
+    Record<string, ReactionCounts>
+  >({});
+
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [hasMore, setHasMore] = useState<boolean>(true);
   const [cursor, setCursor] = useState<string | null>(null);
 
-  const listRef = useRef<FlatList<PostCardVM>>(null);
+  const listRef = useRef<RNFlatList<PostCardVM>>(null);
   const lastLoadMoreAtRef = useRef(0);
   const endReachedDuringMomentum = useRef(false);
 
@@ -194,6 +260,14 @@ const FeedScreen: React.FC = () => {
     urls.forEach(u => Image.prefetch(u).catch(() => {}));
   }, []);
 
+  const sumCounts = (c: ReactionCounts | undefined): number =>
+    (c?.like ?? 0) +
+    (c?.love ?? 0) +
+    (c?.happy ?? 0) +
+    (c?.sad ?? 0) +
+    (c?.wow ?? 0) +
+    (c?.angry ?? 0);
+
   /* Primera página */
   const fetchFirstPage = useCallback(async () => {
     setLoading(true);
@@ -203,14 +277,18 @@ const FeedScreen: React.FC = () => {
 
       const vms: PostCardVM[] = await Promise.all(
         items.map(async (p: PostDoc) => {
-          const [reacted, rc] = await Promise.all([
+          const [myKey, counts] = await Promise.all([
             uid ? getUserPostReacted(p.id, uid) : Promise.resolve(null),
-            countPostReactions(p.id),
+            getPostReactionCounts(p.id),
           ]);
-          return toPostVM(
-            { ...p, reactionCount: rc },
-            Boolean(reacted === 'love'),
+          const rcTotal = sumCounts(counts);
+          const vm = toPostVM(
+            { ...p, reactionCount: rcTotal },
+            myKey === 'love', // compat visual
           );
+          setCurrentByPostId(prev => ({ ...prev, [p.id]: myKey }));
+          setCountsByPostId(prev => ({ ...prev, [p.id]: counts }));
+          return vm;
         }),
       );
 
@@ -242,14 +320,18 @@ const FeedScreen: React.FC = () => {
 
       const vms: PostCardVM[] = await Promise.all(
         items.map(async (p: PostDoc) => {
-          const [reacted, rc] = await Promise.all([
+          const [myKey, counts] = await Promise.all([
             uid ? getUserPostReacted(p.id, uid) : Promise.resolve(null),
-            countPostReactions(p.id),
+            getPostReactionCounts(p.id),
           ]);
-          return toPostVM(
-            { ...p, reactionCount: rc },
-            Boolean(reacted === 'love'),
+          const rcTotal = sumCounts(counts);
+          const vm = toPostVM(
+            { ...p, reactionCount: rcTotal },
+            myKey === 'love',
           );
+          setCurrentByPostId(prev => ({ ...prev, [p.id]: myKey }));
+          setCountsByPostId(prev => ({ ...prev, [p.id]: counts }));
+          return vm;
         }),
       );
 
@@ -278,6 +360,8 @@ const FeedScreen: React.FC = () => {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    setCurrentByPostId({});
+    setCountsByPostId({});
     await fetchFirstPage();
     setRefreshing(false);
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
@@ -287,66 +371,137 @@ const FeedScreen: React.FC = () => {
     void fetchFirstPage();
   }, [fetchFirstPage]);
 
-  /* Reacción optimista + reconcilio */
-  const onToggleReact = useCallback(
-    async (postId: string, next: boolean) => {
+  /* ---------- Reacciones: handler exacto (PostReactionKey) ---------- */
+  const handleReactKeyExact = useCallback(
+    async (postId: string, nextKey: PostReactionKey | null) => {
       if (!uid) return;
 
+      // 1) estado inmediato
+      setCurrentByPostId(prev => ({ ...prev, [postId]: nextKey }));
+
+      // 2) optimista por contadores
+      setCountsByPostId(prev => {
+        const base = prev[postId] ?? {
+          like: 0,
+          love: 0,
+          happy: 0,
+          sad: 0,
+          wow: 0,
+          angry: 0,
+        };
+        const prevKey: PostReactionKey | null =
+          currentByPostId?.[postId] ?? null;
+        const next = { ...base };
+        if (prevKey) next[prevKey] = Math.max(0, (next[prevKey] ?? 0) - 1);
+        if (nextKey) next[nextKey] = (next[nextKey] ?? 0) + 1;
+        return { ...prev, [postId]: next };
+      });
+
+      // 3) persistencia + reconciliación
+      await setMyPostReactionKey(postId, nextKey);
+      const [finalKey, finalCounts] = await Promise.all([
+        uid ? getUserPostReacted(postId, uid) : Promise.resolve(null),
+        getPostReactionCounts(postId),
+      ]);
+
+      setCurrentByPostId(prev => ({ ...prev, [postId]: finalKey }));
+      setCountsByPostId(prev => ({ ...prev, [postId]: finalCounts }));
+
+      const total =
+        (finalCounts.like ?? 0) +
+        (finalCounts.love ?? 0) +
+        (finalCounts.happy ?? 0) +
+        (finalCounts.sad ?? 0) +
+        (finalCounts.wow ?? 0) +
+        (finalCounts.angry ?? 0);
+
       setCards(prev =>
         prev.map(it =>
           it.id === postId
-            ? {
-                ...it,
-                reactedByMe: next,
-                reactionCount: Math.max(0, it.reactionCount + (next ? 1 : -1)),
-              }
-            : it,
-        ),
-      );
-
-      const final = await togglePostReaction(postId, uid);
-      const rc = await countPostReactions(postId);
-
-      setCards(prev =>
-        prev.map(it =>
-          it.id === postId
-            ? { ...it, reactedByMe: final, reactionCount: rc }
+            ? { ...it, reactionCount: total, reactedByMe: finalKey === 'love' }
             : it,
         ),
       );
     },
-    [uid],
+    [uid, currentByPostId],
   );
+
+  /* Adaptador para UIReactionKey (filtra "match") */
+  const handleReactKeyUI = useCallback(
+    async (postId: string, key: UIReactionKey | null) => {
+      const nextKey: PostReactionKey | null =
+        key && key !== 'match' ? (key as PostReactionKey) : null;
+      return handleReactKeyExact(postId, nextKey);
+    },
+    [handleReactKeyExact],
+  );
+
+  /* Compat: toggle “love” rápido (tap corto) → usa el exacto */
+  const onToggleReact = useCallback(
+    async (postId: string, next: boolean) => {
+      if (!uid) return;
+      const key: PostReactionKey | null = next ? 'love' : null;
+      await handleReactKeyExact(postId, key);
+    },
+    [uid, handleReactKeyExact],
+  );
+
+  /* Helper: convertir ReactionCounts → counts UI */
+  const toUICounts = (
+    c: ReactionCounts | undefined,
+  ): Partial<Record<UIReactionKey, number>> => ({
+    like: c?.like ?? 0,
+    love: c?.love ?? 0,
+    happy: c?.happy ?? 0,
+    sad: c?.sad ?? 0,
+    wow: c?.wow ?? 0,
+    angry: c?.angry ?? 0,
+    // 'match' no se usa → omitido
+  });
 
   /* Render */
   const renderItem: ListRenderItem<PostCardVM> = useCallback(
     ({ item, index }) => {
       const author = authorByPostId[item.id];
+      const current = (currentByPostId[item.id] ??
+        null) as UIReactionKey | null;
+      const counts = toUICounts(countsByPostId[item.id]);
       return (
         <AnimatedPostItem
           item={item}
           index={index}
           {...(author ? ({ author } as const) : {})}
           onToggleReact={onToggleReact}
+          currentReaction={current}
+          {...(counts ? ({ counts } as const) : {})}
+          onReactKey={handleReactKeyUI}
         />
       );
     },
-    [onToggleReact, authorByPostId],
+    [
+      onToggleReact,
+      authorByPostId,
+      currentByPostId,
+      countsByPostId,
+      handleReactKeyUI,
+    ],
   );
 
-  // acción del composer (navega a crear post)
-  const onComposerPress = useCallback(() => {
-    // ajusta al nombre real de tu ruta si es distinto
-    // navigation.navigate('CreatePost');
-  }, []);
-
   return (
-    <Screen>
-      {/* Composer estilo Facebook */}
-      <FeedComposerBar
-        {...(me.name ? ({ name: me.name } as const) : {})}
-        {...(me.photoURL ? ({ photoURL: me.photoURL } as const) : {})}
-        onPress={onComposerPress}
+    <Screen edges={['bottom']}>
+      {/* Overlay bajo el notch visible solo al hacer pull */}
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: insets.top,
+          backgroundColor: theme.colors.background,
+          opacity: notchFadeOpacity as any,
+          zIndex: 2,
+        }}
       />
 
       {loading ? (
@@ -366,7 +521,7 @@ const FeedScreen: React.FC = () => {
           </Text>
           <Button
             mode="contained"
-            onPress={onComposerPress}
+            onPress={() => navigation?.navigate?.('CreatePost')}
             style={{ marginTop: 8 }}
             icon="plus"
           >
@@ -374,11 +529,29 @@ const FeedScreen: React.FC = () => {
           </Button>
         </View>
       ) : (
-        <FlatList
-          ref={listRef}
+        <Animated.FlatList
+          ref={listRef as any}
           data={cards}
           keyExtractor={it => it.id}
           renderItem={renderItem}
+          ListHeaderComponent={
+            <Animated.View
+              style={{
+                transform: [
+                  { translateY: bannerTranslateY as any },
+                  { scale: bannerScale as any },
+                ],
+                opacity: bannerOpacity as any,
+              }}
+            >
+              <FeedHeaderBanner />
+              <FeedComposerBar
+                {...(me.name ? ({ name: me.name } as const) : {})}
+                {...(me.photoURL ? ({ photoURL: me.photoURL } as const) : {})}
+                onPress={() => navigation?.navigate?.('CreatePost')}
+              />
+            </Animated.View>
+          }
           ListFooterComponent={
             loadingMore ? (
               <View style={styles.footer}>
@@ -399,8 +572,9 @@ const FeedScreen: React.FC = () => {
             endReachedDuringMomentum.current = false;
           }}
           showsVerticalScrollIndicator={false}
+          contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={{
-            paddingTop: 8,
+            paddingTop: 0,
             paddingHorizontal: 0,
             paddingBottom: 96,
           }}
@@ -408,7 +582,11 @@ const FeedScreen: React.FC = () => {
           maxToRenderPerBatch={8}
           updateCellsBatchingPeriod={50}
           initialNumToRender={10}
-          contentInsetAdjustmentBehavior="automatic"
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: true },
+          )}
+          scrollEventThrottle={16}
         />
       )}
     </Screen>

@@ -1,4 +1,3 @@
-// src/components/feed/PostCard.tsx
 import React, { memo, useMemo, useRef, useState, useCallback } from 'react';
 import {
   View,
@@ -7,30 +6,21 @@ import {
   useWindowDimensions,
   PixelRatio,
   Image as RNImage,
-  Platform,
   FlatList,
+  Modal as RNModal,
   type ListRenderItem,
   type ViewToken,
 } from 'react-native';
-import {
-  Card,
-  Text,
-  useTheme,
-  Portal,
-  Modal,
-  IconButton,
-} from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Card, Text, useTheme, Portal, IconButton } from 'react-native-paper';
 import ReactionFooter from '@components/reactions/ReactionFooterPosts';
 import type { PostCardVM } from '@models/post';
 import { buildCdnUrl, type CdnProvider } from '@utils/cdn';
 
-/* ─────────────────────────────────────────────────────────────
- * Cargas opcionales (sin romper tipado estricto)
- * ───────────────────────────────────────────────────────────── */
+/* ───────── Cargas opcionales ───────── */
 let FastImage: { resizeMode: { cover: 'cover'; contain: 'contain' } } | null =
   null;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   FastImage = require('react-native-fast-image').default;
 } catch {}
 const ImageComponent: React.ComponentType<
@@ -43,11 +33,9 @@ const ImageComponent: React.ComponentType<
   (FastImage as unknown as React.ComponentType<any>) ??
   (RNImage as unknown as React.ComponentType<any>);
 
-/** Props mínimas que usaremos de react-native-video (evita any + intersecciones peligrosas) */
 type SimpleVideoProps = Readonly<{
-  source: Readonly<{ uri: string }>;
-  style: Readonly<{ width: number | string; height: number | string }>;
-  /** En grid los mostramos silenciados/pausados; en visor controlamos por índice */
+  source: { uri: string };
+  style: { width: number | string; height: number | string };
   paused?: boolean;
   muted?: boolean;
   repeat?: boolean;
@@ -56,26 +44,59 @@ type SimpleVideoProps = Readonly<{
 }>;
 let VideoComp: React.ComponentType<SimpleVideoProps> | null = null;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const mod = require('react-native-video');
   VideoComp = (mod?.default ?? mod) as React.ComponentType<SimpleVideoProps>;
 } catch {}
 
-/* ───────────────────────────────────────────────────────────── */
+let ImageViewing: React.ComponentType<any> | null = null;
+try {
+  ImageViewing = require('react-native-image-viewing').default;
+} catch {}
+
+/* ───────── Tipos ───────── */
 type MediaItem = Readonly<{ type: 'image' | 'video'; url: string }>;
 type AuthorLite = Readonly<{ name: string; photoURL?: string }>;
+type UIReactionKey =
+  | 'like'
+  | 'love'
+  | 'happy'
+  | 'sad'
+  | 'wow'
+  | 'angry'
+  | 'match';
+type UIReactionCounts = Readonly<{
+  like: number;
+  love: number;
+  happy: number;
+  sad: number;
+  wow: number;
+  angry: number;
+  match: number;
+}>;
 
 type Props = Readonly<{
   data: PostCardVM;
-  /** opcional: si no viene, se muestra nombre “Usuario” + avatar default */
   author?: AuthorLite;
-  onToggleReact: (postId: string, next: boolean) => void | Promise<void>;
+
+  /** LEGADO: solo ‘love’ */
+  onToggleReact?: (postId: string, next: boolean) => void | Promise<void>;
+
+  /** NUEVO: multi-reacción */
+  currentReaction?: UIReactionKey | null;
+  counts?: Partial<UIReactionCounts>;
+  availableKeys?: UIReactionKey[];
+  onReactKey?: (
+    postId: string,
+    key: UIReactionKey | null,
+  ) => void | Promise<void>;
 }>;
 
 const PROVIDER: CdnProvider = 'auto';
 const GAP = 2;
+const HEADER_BAR_H = 44;
 const defaultAvatar = require('@assets/images/user.png') as number;
 
+/** ✅ Firma correcta: buildCdnUrl(url, opts, provider) */
 const cdnImg = (url: string, w: number, dpr: number, q = 80): string =>
   buildCdnUrl(
     url,
@@ -89,16 +110,14 @@ const cdnImg = (url: string, w: number, dpr: number, q = 80): string =>
     PROVIDER,
   );
 
-/* Garantiza elemento (útil con noUncheckedIndexedAccess) */
+/* helpers */
 function at<T>(arr: readonly T[], idx: number): T {
   const v = arr[idx];
   if (v === undefined) throw new Error(`Index out of bounds: ${idx}`);
   return v;
 }
 
-/* ─────────────────────────────────────────────────────────────
- * Tiles (grid 2 columnas) — con overlay +N en última celda visible
- * ───────────────────────────────────────────────────────────── */
+/* ───────── Grid tiles ───────── */
 const Tile: React.FC<
   Readonly<{
     item: MediaItem;
@@ -109,9 +128,8 @@ const Tile: React.FC<
   }>
 > = ({ item, w, h, dpr, overlayPlus = 0 }) => {
   const uri = item.type === 'image' ? cdnImg(item.url, w, dpr, 80) : item.url;
-
   return (
-    <View style={{ width: w, height: h, backgroundColor: '#eee' }}>
+    <View style={{ width: w, height: h, backgroundColor: '#000' }}>
       {item.type === 'image' ? (
         <ImageComponent
           source={{ uri }}
@@ -132,7 +150,6 @@ const Tile: React.FC<
           style={{ width: '100%', height: '100%', backgroundColor: '#000' }}
         />
       )}
-
       {overlayPlus > 0 ? (
         <View style={styles.plusOverlay}>
           <Text variant="headlineMedium" style={styles.plusText}>
@@ -140,7 +157,6 @@ const Tile: React.FC<
           </Text>
         </View>
       ) : null}
-
       {overlayPlus === 0 && item.type === 'video' ? (
         <View style={styles.playBadge}>
           <Text style={styles.playGlyph}>▶︎</Text>
@@ -175,13 +191,20 @@ const SingleMedia: React.FC<
   );
 };
 
-/* ─────────────────────────────────────────────────────────────
- * Main
- * ───────────────────────────────────────────────────────────── */
-const PostCard: React.FC<Props> = ({ data, author, onToggleReact }) => {
+/* ───────── Componente ───────── */
+const PostCard: React.FC<Props> = ({
+  data,
+  author,
+  onToggleReact,
+  currentReaction,
+  counts,
+  availableKeys,
+  onReactKey,
+}) => {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const { width: winW, height: winH } = useWindowDimensions();
-  const cardW = winW; // ancho completo (sin márgenes)
+  const cardW = winW;
   const dpr = PixelRatio.get();
 
   const images = Array.isArray(data.imageUrls) ? data.imageUrls : [];
@@ -192,7 +215,6 @@ const PostCard: React.FC<Props> = ({ data, author, onToggleReact }) => {
   ];
   const hasMany = media.length > 1;
 
-  // Posiciones de la grilla (2 columnas) — patrones FB-like
   type Pos = Readonly<{
     idx: number;
     x: number;
@@ -201,18 +223,15 @@ const PostCard: React.FC<Props> = ({ data, author, onToggleReact }) => {
     h: number;
     overlay?: number;
   }>;
-
   const { gridH, positions } = useMemo((): Readonly<{
     gridH: number;
     positions: readonly Pos[];
   }> => {
     if (!hasMany) return { gridH: Math.round(cardW * 0.8), positions: [] };
-
     const len = media.length;
     const colW = Math.floor((cardW - GAP) / 2);
     const square = colW;
 
-    // 2 → dos altas (3:4 aprox)
     if (len === 2) {
       const tallH = Math.round((colW * 4) / 3);
       return {
@@ -223,8 +242,6 @@ const PostCard: React.FC<Props> = ({ data, author, onToggleReact }) => {
         ],
       };
     }
-
-    // 3 → L: izquierda grande + dos cuadrados derecha
     if (len === 3) {
       return {
         gridH: square * 2 + GAP,
@@ -235,8 +252,6 @@ const PostCard: React.FC<Props> = ({ data, author, onToggleReact }) => {
         ],
       };
     }
-
-    // 4 → 2x2
     if (len === 4) {
       return {
         gridH: square * 2 + GAP,
@@ -248,8 +263,6 @@ const PostCard: React.FC<Props> = ({ data, author, onToggleReact }) => {
         ],
       };
     }
-
-    // ≥5 → 2 rectangulares arriba + 3 cuadrados abajo (overlay en el último)
     const thirdW = Math.floor((cardW - GAP * 2) / 3);
     const rowTopH = thirdW;
     const positionsTop: Pos[] = [
@@ -272,7 +285,6 @@ const PostCard: React.FC<Props> = ({ data, author, onToggleReact }) => {
       remaining > 0
         ? baseBottom.map((p, i) => (i === 2 ? { ...p, overlay: remaining } : p))
         : baseBottom.slice();
-
     return {
       gridH: rowTopH + GAP + thirdW,
       positions: [...positionsTop, ...positionsBottom],
@@ -280,61 +292,124 @@ const PostCard: React.FC<Props> = ({ data, author, onToggleReact }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasMany, cardW, media.length]);
 
-  /* ─────────────── Visor vertical (estilo Reels) ─────────────── */
+  /* ───── Visor vertical ───── */
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const listRef = useRef<FlatList<MediaItem>>(null);
+  const viewerListRef = useRef<FlatList<MediaItem>>(null);
+  const [imgZoomOpen, setImgZoomOpen] = useState(false);
+  const [imgZoomUri, setImgZoomUri] = useState<string | null>(null);
 
   const openViewerAt = useCallback((i: number) => {
     setViewerIndex(i);
-    setActiveIndex(i);
     setViewerOpen(true);
   }, []);
+  const totalHeader = insets.top + HEADER_BAR_H;
+  const pageH = Math.max(1, Math.round(winH - totalHeader));
 
-  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 95 }).current;
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      const v = viewableItems[0];
-      if (v && typeof v.index === 'number') setActiveIndex(v.index);
+      const first = viewableItems.find(v => v.isViewable);
+      if (typeof first?.index === 'number') setViewerIndex(first.index);
     },
   ).current;
+
+  const onScrollToIndexFailed = useCallback(
+    (e: { index: number }) => {
+      const safeIndex = Math.max(0, Math.min(e.index, media.length - 1));
+      const offset = pageH * safeIndex;
+      requestAnimationFrame(() => {
+        viewerListRef.current?.scrollToOffset?.({ offset, animated: false });
+      });
+    },
+    [media.length, pageH],
+  );
 
   const renderViewerItem: ListRenderItem<MediaItem> = useCallback(
     ({ item, index }) => {
       if (item.type === 'image') {
         return (
-          <View
+          <Pressable
+            onPress={() => {
+              if (!ImageViewing) return;
+              setImgZoomUri(item.url);
+              setImgZoomOpen(true);
+            }}
             style={{
               width: winW,
-              height: winH,
+              height: pageH,
               alignItems: 'center',
               justifyContent: 'center',
+              backgroundColor: '#000',
             }}
           >
             <ImageComponent
-              source={{ uri: cdnImg(item.url, winW, dpr, 90) }}
-              style={{ width: winW, height: winH }}
+              source={{ uri: cdnImg(item.url, winW, dpr, 92) }}
+              style={{ width: winW, height: pageH }}
               resizeMode={FastImage ? FastImage.resizeMode.contain : 'contain'}
             />
-          </View>
+          </Pressable>
         );
       }
       return (
-        <View style={{ width: winW, height: winH, backgroundColor: '#000' }}>
+        <View style={{ width: winW, height: pageH, backgroundColor: '#000' }}>
           {VideoComp ? (
             <VideoComp
               source={{ uri: item.url }}
-              style={{ width: winW, height: winH }}
+              style={{ width: winW, height: pageH }}
               controls
-              paused={index !== activeIndex}
+              paused={viewerIndex !== index}
+              muted={viewerIndex !== index}
               resizeMode="contain"
             />
           ) : null}
         </View>
       );
     },
-    [winW, winH, dpr, activeIndex],
+    [winW, pageH, dpr, viewerIndex],
+  );
+
+  /* ───── Footer y conteos (sin “love” fantasma) ───── */
+  const keysAvailable: UIReactionKey[] = availableKeys ?? [
+    'like',
+    'love',
+    'happy',
+    'sad',
+    'wow',
+    'angry',
+  ];
+  const isMulti = Boolean(onReactKey) || keysAvailable.some(k => k !== 'love');
+  const zeroCounts: UIReactionCounts = {
+    like: 0,
+    love: 0,
+    happy: 0,
+    sad: 0,
+    wow: 0,
+    angry: 0,
+    match: 0,
+  };
+
+  const countsMerged: UIReactionCounts = isMulti
+    ? { ...zeroCounts, ...(counts ?? {}) } // multi → NO sembrar love
+    : { ...zeroCounts, love: data.reactionCount ?? 0, ...(counts ?? {}) }; // legado → solo love
+
+  const footerCurrent: UIReactionKey | null =
+    typeof currentReaction !== 'undefined'
+      ? currentReaction
+      : data.reactedByMe
+        ? 'love'
+        : null;
+
+  const handleReact = useCallback(
+    (id: string, key: UIReactionKey, active: boolean) => {
+      if (onReactKey) {
+        void onReactKey(id, active ? key : null);
+        return;
+      }
+      if (key === 'love' && onToggleReact) {
+        void onToggleReact(id, active);
+      }
+    },
+    [onReactKey, onToggleReact],
   );
 
   return (
@@ -345,7 +420,7 @@ const PostCard: React.FC<Props> = ({ data, author, onToggleReact }) => {
         {
           backgroundColor: theme.colors.surface,
           borderRadius: 0,
-          marginHorizontal: 0, // sin márgenes laterales
+          marginHorizontal: 0,
         },
       ]}
     >
@@ -383,7 +458,7 @@ const PostCard: React.FC<Props> = ({ data, author, onToggleReact }) => {
         <IconButton icon="dots-horizontal" onPress={() => {}} />
       </View>
 
-      {/* Texto arriba */}
+      {/* Texto */}
       {data.content ? (
         <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
           <Text variant="bodyLarge">{data.content}</Text>
@@ -416,14 +491,15 @@ const PostCard: React.FC<Props> = ({ data, author, onToggleReact }) => {
           ))}
         </View>
       ) : (
-        <View
-          style={{ width: '100%', aspectRatio: 1, backgroundColor: '#eee' }}
+        <Pressable
+          style={{ width: '100%', aspectRatio: 1, backgroundColor: '#000' }}
+          onPress={() => openViewerAt(0)}
         >
           <SingleMedia item={at(media, 0)} cardW={cardW} dpr={dpr} />
-        </View>
+        </Pressable>
       )}
 
-      {/* Footer con fondo (separado del media) */}
+      {/* Footer */}
       <View
         style={[
           styles.footerWrap,
@@ -435,66 +511,104 @@ const PostCard: React.FC<Props> = ({ data, author, onToggleReact }) => {
       >
         <ReactionFooter
           id={data.id}
-          current={data.reactedByMe ? 'love' : null}
-          counts={{ love: data.reactionCount }}
-          availableKeys={['like', 'love', 'happy', 'sad', 'wow', 'angry']}
-          onReact={(id, key, active) => {
-            if (key !== 'love') return;
-            void onToggleReact(id, active);
-          }}
+          current={footerCurrent}
+          counts={countsMerged}
+          availableKeys={keysAvailable}
+          onReact={handleReact}
           commentsCount={data.commentCount}
           sharesCount={data.shareCount}
         />
       </View>
 
-      {/* Visor modal vertical (pagingEnabled) */}
+      {/* Visor fullscreen vertical */}
       <Portal>
-        <Modal
+        <RNModal
           visible={viewerOpen}
-          onDismiss={() => setViewerOpen(false)}
-          contentContainerStyle={[
-            styles.viewer,
-            {
-              backgroundColor:
-                Platform.OS === 'web' ? 'rgba(0,0,0,0.7)' : 'rgba(0,0,0,0.95)',
-            },
-          ]}
+          onRequestClose={() => setViewerOpen(false)}
+          animationType="fade"
+          presentationStyle="fullScreen"
+          statusBarTranslucent
+          transparent={false}
         >
-          <FlatList
-            ref={listRef}
-            data={media}
-            keyExtractor={(_m, i) => `v-${i}`}
-            renderItem={renderViewerItem}
-            horizontal={false}
-            pagingEnabled
-            showsVerticalScrollIndicator={false}
-            initialScrollIndex={viewerIndex}
-            getItemLayout={(_d, index) => ({
-              length: winH,
-              offset: winH * index,
-              index,
-            })}
-            onScrollToIndexFailed={info => {
-              // fallback robusto si RN no tiene aún medido el layout
-              setTimeout(() => {
-                listRef.current?.scrollToIndex({
-                  index: info.index,
-                  animated: false,
-                });
-              }, 0);
-            }}
-            onViewableItemsChanged={onViewableItemsChanged}
-            viewabilityConfig={viewabilityConfig}
-            style={{ width: winW, height: winH }}
-          />
-          <IconButton
-            icon="close"
-            onPress={() => setViewerOpen(false)}
-            style={{ position: 'absolute', top: 8, right: 8 }}
-            containerColor="rgba(0,0,0,0.6)"
-            iconColor="#fff"
-          />
-        </Modal>
+          <View style={{ flex: 1, backgroundColor: '#000' }}>
+            <FlatList
+              ref={viewerListRef}
+              data={media as MediaItem[]}
+              keyExtractor={(_m, i) => `v-${i}`}
+              renderItem={renderViewerItem}
+              pagingEnabled
+              showsVerticalScrollIndicator={false}
+              initialScrollIndex={viewerIndex}
+              getItemLayout={(_d, index) => ({
+                length: pageH,
+                offset: pageH * index,
+                index,
+              })}
+              onViewableItemsChanged={onViewableItemsChanged}
+              onScrollToIndexFailed={onScrollToIndexFailed}
+              style={{ flex: 1, marginTop: insets.top + HEADER_BAR_H }}
+              removeClippedSubviews
+              windowSize={3}
+            />
+
+            {/* Header del visor */}
+            <View
+              style={[
+                styles.viewerHeaderBar,
+                { paddingTop: insets.top, height: insets.top + HEADER_BAR_H },
+              ]}
+            >
+              <Pressable
+                onPress={() => setViewerOpen(false)}
+                style={styles.backBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Regresar a la publicación"
+              >
+                <Text style={{ color: '#fff', fontSize: 20 }}>{'‹'}</Text>
+              </Pressable>
+              <ImageComponent
+                source={
+                  author?.photoURL
+                    ? { uri: author.photoURL }
+                    : (defaultAvatar as number)
+                }
+                style={styles.viewerAvatar}
+                resizeMode={FastImage ? FastImage.resizeMode.cover : 'cover'}
+              />
+              <View style={{ flex: 1 }}>
+                <Text
+                  variant="titleSmall"
+                  style={[styles.authorName, { color: '#fff' }]}
+                >
+                  {author?.name ?? 'Usuario'}
+                </Text>
+                <Text
+                  variant="labelSmall"
+                  style={{ opacity: 0.85, color: '#fff' }}
+                >
+                  {new Date(data.createdAt).toLocaleDateString('es-ES', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                  })}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Zoom de imagen si la lib existe */}
+          {ImageViewing && imgZoomUri ? (
+            <ImageViewing
+              images={[{ uri: imgZoomUri }]}
+              imageIndex={0}
+              visible={imgZoomOpen}
+              onRequestClose={() => setImgZoomOpen(false)}
+              backgroundColor="#000"
+              swipeToCloseEnabled
+              doubleTapToZoomEnabled
+            />
+          ) : null}
+        </RNModal>
       </Portal>
     </Card>
   );
@@ -539,17 +653,53 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   playGlyph: { color: '#fff', fontSize: 12, marginLeft: 1 },
-  viewer: {
-    marginHorizontal: 0,
+  viewerHeaderBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  backBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 0,
+    marginRight: 8,
+  },
+  viewerAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    marginRight: 8,
+    backgroundColor: '#333',
   },
 });
 
+/* memo con props opcionales seguro para exactOptionalPropertyTypes */
 export default memo(PostCard, (a, b) => {
   const x = a.data,
     y = b.data;
+  const countsEq = (c1?: Props['counts'], c2?: Props['counts']) => {
+    if (!c1 && !c2) return true;
+    if (!c1 || !c2) return false;
+    const keys: (keyof UIReactionCounts)[] = [
+      'like',
+      'love',
+      'happy',
+      'sad',
+      'wow',
+      'angry',
+      'match',
+    ];
+    return keys.every(k => (c1 as any)[k] === (c2 as any)[k]);
+  };
   return (
     x.id === y.id &&
     x.reactedByMe === y.reactedByMe &&
@@ -559,6 +709,10 @@ export default memo(PostCard, (a, b) => {
     (x.videoUrls?.[0] ?? '') === (y.videoUrls?.[0] ?? '') &&
     (a.author?.name ?? '') === (b.author?.name ?? '') &&
     (a.author?.photoURL ?? '') === (b.author?.photoURL ?? '') &&
-    a.onToggleReact === b.onToggleReact
+    a.onToggleReact === b.onToggleReact &&
+    a.onReactKey === b.onReactKey &&
+    a.currentReaction === b.currentReaction &&
+    countsEq(a.counts, b.counts) &&
+    String(a.availableKeys) === String(b.availableKeys)
   );
 });
