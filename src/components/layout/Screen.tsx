@@ -1,45 +1,31 @@
 import React from 'react';
-import { View, ScrollView, StyleSheet } from 'react-native';
-import type { ViewStyle } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScrollView } from 'react-native';
+import type { StyleProp, ViewStyle } from 'react-native'; // <- type-only
+import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import { useTheme } from 'react-native-paper';
 
-interface Props {
-  scrollable?: boolean;
+type Props = Readonly<{
   children: React.ReactNode;
-  style?: ViewStyle;
-}
+  scrollable?: boolean;
+  style?: StyleProp<ViewStyle>;
+  /** Por defecto NO reservamos la zona superior para dejar pasar el contenido bajo el notch. */
+  edges?: Edge[];
+}>;
 
-const Screen: React.FC<Props> = ({ scrollable, children, style }) => {
-  const insets = useSafeAreaInsets();
+const Screen: React.FC<Props> = ({ children, scrollable, style, edges }) => {
   const theme = useTheme();
 
-  const baseStyle = {
-    backgroundColor: theme.colors.background,
-    flex: 1,
-  } satisfies ViewStyle;
-
-  if (scrollable) {
-    return (
-      <ScrollView
-        style={[baseStyle, { paddingTop: insets.top }, style]}
-        contentContainerStyle={{
-          paddingHorizontal: 16,
-          paddingVertical: 16,
-          flexGrow: 1,
-        }}
-        contentInsetAdjustmentBehavior="automatic"
-      >
-        {children}
-      </ScrollView>
-    );
-  }
-
-  return (
-    <View style={[baseStyle, { paddingTop: insets.top }, style]}>
+  const content = (
+    <SafeAreaView
+      style={[{ flex: 1, backgroundColor: theme.colors.background }, style]}
+      edges={edges ?? ['bottom']}
+    >
       {children}
-    </View>
+    </SafeAreaView>
   );
+
+  if (scrollable) return <ScrollView bounces>{content}</ScrollView>;
+  return content;
 };
 
 export default Screen;
