@@ -8,6 +8,7 @@ import {
   RefreshControl,
   StyleSheet,
   View,
+  type ViewToken,
 } from 'react-native';
 import type { ListRenderItem } from 'react-native';
 import { ActivityIndicator, Button, Text, useTheme } from 'react-native-paper';
@@ -24,16 +25,16 @@ import {
   getUserReacted as getUserPostReacted,
   getReactionCounts as getPostReactionCounts,
   setMyReactionKey as setMyPostReactionKey,
-  countReactions as countPostReactions, // compat opcional
-  toggleReaction as togglePostReaction, // compat 'love'
 } from '@services/postReactionsService';
 
 import type { PostDoc, PostCardVM } from '@models/post';
 import { getAuth, getFirestore, doc, getDoc } from '@services/firebase';
 import type { FirebaseFirestoreTypes } from '@services/firebase';
 
-import type { ReactionCounts, UIReactionKey } from '@reactions/types';
+import type { ReactionCounts, ReactionKey } from '@reactions/types';
 import type { PostReactionKey } from '@services/postReactionsService';
+
+type UIReactionKey = ReactionKey;
 
 /* ───────────────────────────────────────────────────────────── */
 const PAGE_SIZE = 20;
@@ -92,6 +93,7 @@ const AnimatedPostItem: React.FC<{
     postId: string,
     key: UIReactionKey | null,
   ) => void | Promise<void>;
+  isVisible: boolean;
 }> = ({
   item,
   index,
@@ -100,6 +102,7 @@ const AnimatedPostItem: React.FC<{
   currentReaction,
   counts,
   onReactKey,
+  isVisible,
 }) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(8)).current;
@@ -127,11 +130,12 @@ const AnimatedPostItem: React.FC<{
       <PostCard
         data={item}
         {...(author ? ({ author } as const) : {})}
-        onToggleReact={onToggleReact} // compat (tap corto -> love)
+        onToggleReact={onToggleReact}
         currentReaction={currentReaction}
         {...(counts ? ({ counts } as const) : {})}
         onReactKey={onReactKey}
-        availableKeys={['like', 'love', 'happy', 'sad', 'wow', 'angry']} // sin 'match' en UI
+        availableKeys={['like', 'love', 'happy', 'sad', 'wow', 'angry']}
+        isVisible={isVisible}
       />
     </Animated.View>
   );
@@ -178,13 +182,16 @@ const FeedScreen: React.FC = () => {
     {},
   );
 
-  // 🔒 Reacciones (estado por post) — PRESERVADO
+  // 🔒 Reacciones (estado por post)
   const [currentByPostId, setCurrentByPostId] = useState<
     Record<string, PostReactionKey | null>
   >({});
   const [countsByPostId, setCountsByPostId] = useState<
     Record<string, ReactionCounts>
   >({});
+
+  // Visibilidad por post (autopreview)
+  const [visibleMap, setVisibleMap] = useState<Record<string, true>>({});
 
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -196,7 +203,7 @@ const FeedScreen: React.FC = () => {
   const lastLoadMoreAtRef = useRef(0);
   const endReachedDuringMomentum = useRef(false);
 
-  // cargar mi usuario (para la barra de composer)
+  // cargar mi usuario (para composer)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -284,7 +291,7 @@ const FeedScreen: React.FC = () => {
           const rcTotal = sumCounts(counts);
           const vm = toPostVM(
             { ...p, reactionCount: rcTotal },
-            myKey === 'love', // compat visual
+            myKey === 'love',
           );
           setCurrentByPostId(prev => ({ ...prev, [p.id]: myKey }));
           setCountsByPostId(prev => ({ ...prev, [p.id]: counts }));
@@ -371,15 +378,34 @@ const FeedScreen: React.FC = () => {
     void fetchFirstPage();
   }, [fetchFirstPage]);
 
+  // alias claro para usar dentro del handler
+  const setMyReactionKey = setMyPostReactionKey;
+
   /* ---------- Reacciones: handler exacto (PostReactionKey) ---------- */
   const handleReactKeyExact = useCallback(
     async (postId: string, nextKey: PostReactionKey | null) => {
       if (!uid) return;
 
+      const prevKey: PostReactionKey | null = currentByPostId?.[postId] ?? null;
+      const delta = (nextKey ? 1 : 0) - (prevKey ? 1 : 0); // +1,0,-1
+
+      // 0) Optimista: evita “love” fantasma
+      setCards(prev =>
+        prev.map(it =>
+          it.id === postId
+            ? {
+                ...it,
+                reactedByMe: nextKey === 'love',
+                reactionCount: Math.max(0, it.reactionCount + delta),
+              }
+            : it,
+        ),
+      );
+
       // 1) estado inmediato
       setCurrentByPostId(prev => ({ ...prev, [postId]: nextKey }));
 
-      // 2) optimista por contadores
+      // 2) optimista en contadores por clave
       setCountsByPostId(prev => {
         const base = prev[postId] ?? {
           like: 0,
@@ -389,8 +415,6 @@ const FeedScreen: React.FC = () => {
           wow: 0,
           angry: 0,
         };
-        const prevKey: PostReactionKey | null =
-          currentByPostId?.[postId] ?? null;
         const next = { ...base };
         if (prevKey) next[prevKey] = Math.max(0, (next[prevKey] ?? 0) - 1);
         if (nextKey) next[nextKey] = (next[nextKey] ?? 0) + 1;
@@ -398,7 +422,7 @@ const FeedScreen: React.FC = () => {
       });
 
       // 3) persistencia + reconciliación
-      await setMyPostReactionKey(postId, nextKey);
+      await setMyReactionKey(postId, nextKey);
       const [finalKey, finalCounts] = await Promise.all([
         uid ? getUserPostReacted(postId, uid) : Promise.resolve(null),
         getPostReactionCounts(postId),
@@ -426,7 +450,7 @@ const FeedScreen: React.FC = () => {
     [uid, currentByPostId],
   );
 
-  /* Adaptador para UIReactionKey (filtra "match") */
+  /* Adaptador UI (filtra "match") */
   const handleReactKeyUI = useCallback(
     async (postId: string, key: UIReactionKey | null) => {
       const nextKey: PostReactionKey | null =
@@ -436,7 +460,7 @@ const FeedScreen: React.FC = () => {
     [handleReactKeyExact],
   );
 
-  /* Compat: toggle “love” rápido (tap corto) → usa el exacto */
+  /* Compat: toggle “love” */
   const onToggleReact = useCallback(
     async (postId: string, next: boolean) => {
       if (!uid) return;
@@ -446,7 +470,7 @@ const FeedScreen: React.FC = () => {
     [uid, handleReactKeyExact],
   );
 
-  /* Helper: convertir ReactionCounts → counts UI */
+  /* Convertir ReactionCounts → counts UI parciales */
   const toUICounts = (
     c: ReactionCounts | undefined,
   ): Partial<Record<UIReactionKey, number>> => ({
@@ -456,8 +480,22 @@ const FeedScreen: React.FC = () => {
     sad: c?.sad ?? 0,
     wow: c?.wow ?? 0,
     angry: c?.angry ?? 0,
-    // 'match' no se usa → omitido
   });
+
+  /* Viewability para auto-preview de video */
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 85 }).current;
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      const next: Record<string, true> = {};
+      for (const v of viewableItems) {
+        if (v.isViewable) {
+          const it = v.item as PostCardVM;
+          next[it.id] = true;
+        }
+      }
+      setVisibleMap(next);
+    },
+  ).current;
 
   /* Render */
   const renderItem: ListRenderItem<PostCardVM> = useCallback(
@@ -466,6 +504,7 @@ const FeedScreen: React.FC = () => {
       const current = (currentByPostId[item.id] ??
         null) as UIReactionKey | null;
       const counts = toUICounts(countsByPostId[item.id]);
+      const isVisible = !!visibleMap[item.id];
       return (
         <AnimatedPostItem
           item={item}
@@ -475,6 +514,7 @@ const FeedScreen: React.FC = () => {
           currentReaction={current}
           {...(counts ? ({ counts } as const) : {})}
           onReactKey={handleReactKeyUI}
+          isVisible={isVisible}
         />
       );
     },
@@ -484,6 +524,7 @@ const FeedScreen: React.FC = () => {
       currentByPostId,
       countsByPostId,
       handleReactKeyUI,
+      visibleMap,
     ],
   );
 
@@ -516,7 +557,15 @@ const FeedScreen: React.FC = () => {
           <Text variant="titleMedium" style={styles.emptyText}>
             Aún no hay actualizaciones
           </Text>
-          <Text variant="bodyMedium" style={styles.emptyHint}>
+          <Text
+            variant="bodyMedium"
+            style={{
+              textAlign: 'center',
+              opacity: 0.6,
+              fontSize: 14,
+              marginBottom: 12,
+            }}
+          >
             Comparte fotos o videos de tus huellitas para romper el hielo.
           </Text>
           <Button
@@ -587,6 +636,8 @@ const FeedScreen: React.FC = () => {
             { useNativeDriver: true },
           )}
           scrollEventThrottle={16}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
         />
       )}
     </Screen>
@@ -600,14 +651,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emptyText: { fontWeight: '600', marginBottom: 4, fontSize: 18 },
-  emptyHint: {
-    textAlign: 'center',
-    opacity: 0.6,
-    fontSize: 14,
-    marginBottom: 12,
-  },
   emptyImage: { width: 96, height: 96, opacity: 0.3, marginBottom: 16 },
+  emptyText: { fontWeight: '600', marginBottom: 4, fontSize: 18 },
   footer: { paddingVertical: 16 },
 });
 

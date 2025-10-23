@@ -1,3 +1,4 @@
+// src/components/feed/PostCard.tsx
 import React, { memo, useMemo, useRef, useState, useCallback } from 'react';
 import {
   View,
@@ -13,9 +14,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card, Text, useTheme, Portal, IconButton } from 'react-native-paper';
+
 import ReactionFooter from '@components/reactions/ReactionFooterPosts';
 import type { PostCardVM } from '@models/post';
 import { buildCdnUrl, type CdnProvider } from '@utils/cdn';
+import type { ReactionKey } from '@reactions/types';
+
+// Alias único para evitar conflictos de tipos
+type UIReactionKey = ReactionKey;
+type UIReactionCounts = Readonly<Record<UIReactionKey, number>>;
 
 /* ───────── Cargas opcionales ───────── */
 let FastImage: { resizeMode: { cover: 'cover'; contain: 'contain' } } | null =
@@ -56,23 +63,6 @@ try {
 /* ───────── Tipos ───────── */
 type MediaItem = Readonly<{ type: 'image' | 'video'; url: string }>;
 type AuthorLite = Readonly<{ name: string; photoURL?: string }>;
-type UIReactionKey =
-  | 'like'
-  | 'love'
-  | 'happy'
-  | 'sad'
-  | 'wow'
-  | 'angry'
-  | 'match';
-type UIReactionCounts = Readonly<{
-  like: number;
-  love: number;
-  happy: number;
-  sad: number;
-  wow: number;
-  angry: number;
-  match: number;
-}>;
 
 type Props = Readonly<{
   data: PostCardVM;
@@ -89,6 +79,9 @@ type Props = Readonly<{
     postId: string,
     key: UIReactionKey | null,
   ) => void | Promise<void>;
+
+  /** Visibilidad en feed (para autopreview de single video) */
+  isVisible?: boolean | undefined;
 }>;
 
 const PROVIDER: CdnProvider = 'auto';
@@ -96,7 +89,7 @@ const GAP = 2;
 const HEADER_BAR_H = 44;
 const defaultAvatar = require('@assets/images/user.png') as number;
 
-/** ✅ Firma correcta: buildCdnUrl(url, opts, provider) */
+/** Firma correcta: buildCdnUrl(url, opts, provider) */
 const cdnImg = (url: string, w: number, dpr: number, q = 80): string =>
   buildCdnUrl(
     url,
@@ -167,25 +160,43 @@ const Tile: React.FC<
 };
 
 const SingleMedia: React.FC<
-  Readonly<{ item: MediaItem; cardW: number; dpr: number }>
-> = ({ item, cardW, dpr }) => {
+  Readonly<{
+    item: MediaItem;
+    cardW: number;
+    dpr: number;
+    isVisible?: boolean;
+  }>
+> = ({ item, cardW, dpr, isVisible = false }) => {
   const uri =
     item.type === 'image' ? cdnImg(item.url, cardW, dpr, 90) : item.url;
-  return item.type === 'image' ? (
-    <ImageComponent
-      source={{ uri }}
-      style={{ width: '100%', height: '100%' }}
-      resizeMode={FastImage ? FastImage.resizeMode.cover : 'cover'}
-    />
-  ) : VideoComp ? (
-    <VideoComp
-      source={{ uri }}
-      style={{ width: '100%', height: '100%' }}
-      paused
-      muted
-      repeat
-      resizeMode="cover"
-    />
+
+  if (item.type === 'image') {
+    return (
+      <ImageComponent
+        source={{ uri }}
+        style={{ width: '100%', height: '100%' }}
+        resizeMode={FastImage ? FastImage.resizeMode.cover : 'cover'}
+      />
+    );
+  }
+
+  return VideoComp ? (
+    <View style={{ width: '100%', height: '100%' }}>
+      <VideoComp
+        source={{ uri }}
+        style={{ width: '100%', height: '100%' }}
+        paused={!isVisible} // autopreview cuando está visible
+        muted
+        repeat
+        resizeMode="cover"
+        controls={false}
+      />
+      {!isVisible ? (
+        <View pointerEvents="none" style={styles.playBadgeLarge}>
+          <Text style={styles.playGlyphLarge}>▶︎</Text>
+        </View>
+      ) : null}
+    </View>
   ) : (
     <View style={{ width: '100%', height: '100%', backgroundColor: '#000' }} />
   );
@@ -200,6 +211,7 @@ const PostCard: React.FC<Props> = ({
   counts,
   availableKeys,
   onReactKey,
+  isVisible,
 }) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -378,6 +390,7 @@ const PostCard: React.FC<Props> = ({
     'angry',
   ];
   const isMulti = Boolean(onReactKey) || keysAvailable.some(k => k !== 'love');
+
   const zeroCounts: UIReactionCounts = {
     like: 0,
     love: 0,
@@ -388,11 +401,13 @@ const PostCard: React.FC<Props> = ({
     match: 0,
   };
 
-  const countsMerged: UIReactionCounts = isMulti
-    ? { ...zeroCounts, ...(counts ?? {}) } // multi → NO sembrar love
-    : { ...zeroCounts, love: data.reactionCount ?? 0, ...(counts ?? {}) }; // legado → solo love
+  // Multi: NO sembrar love desde data.reactionCount (evita fantasma)
+  // Legado: solo love toma data.reactionCount
+  const countsForFooter: UIReactionCounts = isMulti
+    ? { ...zeroCounts, ...(counts ?? {}) }
+    : { ...zeroCounts, love: data.reactionCount ?? 0, ...(counts ?? {}) };
 
-  const footerCurrent: UIReactionKey | null =
+  const currentForFooter: UIReactionKey | null =
     typeof currentReaction !== 'undefined'
       ? currentReaction
       : data.reactedByMe
@@ -495,7 +510,12 @@ const PostCard: React.FC<Props> = ({
           style={{ width: '100%', aspectRatio: 1, backgroundColor: '#000' }}
           onPress={() => openViewerAt(0)}
         >
-          <SingleMedia item={at(media, 0)} cardW={cardW} dpr={dpr} />
+          <SingleMedia
+            item={at(media, 0)}
+            cardW={cardW}
+            dpr={dpr}
+            isVisible={!!isVisible}
+          />
         </Pressable>
       )}
 
@@ -511,8 +531,8 @@ const PostCard: React.FC<Props> = ({
       >
         <ReactionFooter
           id={data.id}
-          current={footerCurrent}
-          counts={countsMerged}
+          current={currentForFooter}
+          counts={countsForFooter}
           availableKeys={keysAvailable}
           onReact={handleReact}
           commentsCount={data.commentCount}
@@ -641,18 +661,37 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   plusText: { color: '#fff', fontWeight: '800' },
+
+  // Grid: badge más grande
   playBadge: {
     position: 'absolute',
-    bottom: 6,
-    right: 6,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    bottom: 8,
+    right: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: 'rgba(0,0,0,0.6)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  playGlyph: { color: '#fff', fontSize: 12, marginLeft: 1 },
+  playGlyph: { color: '#fff', fontSize: 14, marginLeft: 1 },
+
+  // Single video: badge grande centrado
+  playBadgeLarge: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    width: 64,
+    height: 64,
+    marginLeft: -32,
+    marginTop: -32,
+    borderRadius: 32,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playGlyphLarge: { color: '#fff', fontSize: 30, marginLeft: 4 },
+
   viewerHeaderBar: {
     position: 'absolute',
     top: 0,
@@ -682,14 +721,15 @@ const styles = StyleSheet.create({
   },
 });
 
-/* memo con props opcionales seguro para exactOptionalPropertyTypes */
+/* memo con props opcionales (exactOptionalPropertyTypes safe) */
 export default memo(PostCard, (a, b) => {
   const x = a.data,
     y = b.data;
-  const countsEq = (c1?: Props['counts'], c2?: Props['counts']) => {
+
+  const countsEq = (c1?: Props['counts'], c2?: Props['counts']): boolean => {
     if (!c1 && !c2) return true;
     if (!c1 || !c2) return false;
-    const keys: (keyof UIReactionCounts)[] = [
+    const keys: UIReactionKey[] = [
       'like',
       'love',
       'happy',
@@ -700,6 +740,7 @@ export default memo(PostCard, (a, b) => {
     ];
     return keys.every(k => (c1 as any)[k] === (c2 as any)[k]);
   };
+
   return (
     x.id === y.id &&
     x.reactedByMe === y.reactedByMe &&
@@ -713,6 +754,7 @@ export default memo(PostCard, (a, b) => {
     a.onReactKey === b.onReactKey &&
     a.currentReaction === b.currentReaction &&
     countsEq(a.counts, b.counts) &&
-    String(a.availableKeys) === String(b.availableKeys)
+    String(a.availableKeys) === String(b.availableKeys) &&
+    a.isVisible === b.isVisible
   );
 });
