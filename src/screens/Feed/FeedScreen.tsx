@@ -1,17 +1,21 @@
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  FlatList,
-  RefreshControl,
-  View,
-  StyleSheet,
   Image,
   Animated,
+  FlatList, // tipos
+  RefreshControl,
+  StyleSheet,
+  View,
 } from 'react-native';
 import type { ListRenderItem } from 'react-native';
 import { ActivityIndicator, Button, Text, useTheme } from 'react-native-paper';
+import { useNavigation } from '@react-navigation/native';
+
 import Loading from '@components/feedback/Loading';
 import Screen from '@components/layout/Screen';
 import PostCard from '@components/feed/PostCard';
+import FeedHeaderBanner from '@components/feed/FeedHeaderBanner';
 import FeedComposerBar from '@components/feed/FeedComposerBar';
 
 import { listPostsPublic, toPostVM } from '@services/postsService';
@@ -23,8 +27,8 @@ import {
 
 import type { PostDoc, PostCardVM } from '@models/post';
 import { getAuth, getFirestore, doc, getDoc } from '@services/firebase';
-import type { FirebaseFirestoreTypes } from '@services/firebase';
 
+/* ───────────────────────────────────────────────────────────── */
 const PAGE_SIZE = 20;
 const LOAD_MORE_COOLDOWN_MS = 900;
 
@@ -55,13 +59,7 @@ type UserLight = Readonly<{
   username?: string;
   photoURL?: string;
 }>;
-const userRef = (uid: string) =>
-  doc(
-    getFirestore(),
-    'users',
-    uid,
-  ) as FirebaseFirestoreTypes.DocumentReference<UserLight>;
-
+const userRef = (uid: string) => doc(getFirestore(), 'users', uid);
 const displayFromUser = (u: UserLight | undefined | null): string => {
   if (u?.fullName && u.fullName.trim()) return u.fullName;
   if (u?.displayName && u.displayName.trim()) return u.displayName;
@@ -99,60 +97,68 @@ const AnimatedPostItem: React.FC<{
 
   return (
     <Animated.View style={{ opacity, transform: [{ translateY }] }}>
-      {author ? (
-        <PostCard data={item} author={author} onToggleReact={onToggleReact} />
-      ) : (
-        <PostCard data={item} onToggleReact={onToggleReact} />
-      )}
+      <PostCard
+        data={item}
+        {...(author ? ({ author } as const) : {})}
+        onToggleReact={onToggleReact}
+      />
     </Animated.View>
   );
 };
 
+/* Pantalla */
 const FeedScreen: React.FC = () => {
   const theme = useTheme();
+  const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+
   const auth = getAuth();
   const uid = auth.currentUser?.uid ?? null;
+
+  // 🔸 Animated scroll para efectos del header
+  const scrollY = useRef(new Animated.Value(0)).current;
+
+  const bannerScale = scrollY.interpolate({
+    inputRange: [-120, 0],
+    outputRange: [1.1, 1],
+    extrapolate: 'clamp',
+  });
+  const bannerTranslateY = scrollY.interpolate({
+    inputRange: [-120, 0, 60],
+    outputRange: [-12, 0, -12],
+    extrapolate: 'clamp',
+  });
+  const bannerOpacity = scrollY.interpolate({
+    inputRange: [0, 60],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+  const notchFadeOpacity = scrollY.interpolate({
+    inputRange: [-40, 0],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
 
   const [cards, setCards] = useState<PostCardVM[]>([]);
   const [authorByPostId, setAuthorByPostId] = useState<
     Record<string, Readonly<{ name: string; photoURL?: string }>>
   >({});
-  const [me, setMe] = useState<Readonly<{ name?: string; photoURL?: string }>>(
-    {},
-  );
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [hasMore, setHasMore] = useState<boolean>(true);
   const [cursor, setCursor] = useState<string | null>(null);
 
+  // Sólo avatar para el composer
+  const [me, setMe] = useState<Readonly<{ photoURL?: string }>>({});
+
   const listRef = useRef<FlatList<PostCardVM>>(null);
   const lastLoadMoreAtRef = useRef(0);
   const endReachedDuringMomentum = useRef(false);
 
-  // cargar mi usuario (para la barra de composer)
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      if (!uid) {
-        if (alive) setMe({});
-        return;
-      }
-      const snap = await getDoc(userRef(uid));
-      const u = snap.exists() ? (snap.data() as UserLight) : undefined;
-      const name = displayFromUser(u ?? null);
-      const next: Readonly<{ name?: string; photoURL?: string }> = u?.photoURL
-        ? ({ name, photoURL: u.photoURL } as const)
-        : ({ name } as const);
-      if (alive) setMe(next);
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [uid]);
-
-  // Cache por uid
+  // Cache usuarios
   const userCacheRef = useRef<Map<string, UserLight>>(new Map());
+
   const resolveAuthorsFor = useCallback(async (posts: PostDoc[]) => {
     const uids = Array.from(
       new Set(
@@ -165,8 +171,10 @@ const FeedScreen: React.FC = () => {
     if (missing.length > 0) {
       const snaps = await Promise.all(missing.map(id => getDoc(userRef(id))));
       snaps.forEach(s => {
-        if (s.exists()) userCacheRef.current.set(s.id, s.data() as UserLight);
-        else userCacheRef.current.set(s.id, { uid: s.id } as UserLight);
+        if (s.exists())
+          userCacheRef.current.set(s.id as string, s.data() as UserLight);
+        else
+          userCacheRef.current.set(s.id as string, { uid: s.id } as UserLight);
       });
     }
     const map: Record<
@@ -186,6 +194,22 @@ const FeedScreen: React.FC = () => {
     }
     setAuthorByPostId(prev => ({ ...prev, ...map }));
   }, []);
+
+  // Avatar para composer (solo set si existe)
+  useEffect(() => {
+    (async () => {
+      const id = auth.currentUser?.uid;
+      if (!id) {
+        setMe({});
+        return;
+      }
+      const s = await getDoc(userRef(id));
+      const u = s.exists() ? (s.data() as UserLight) : undefined;
+      const next = {} as { photoURL?: string };
+      if (u?.photoURL) next.photoURL = u.photoURL;
+      setMe(next);
+    })().catch(() => setMe({}));
+  }, [auth.currentUser?.uid]);
 
   const prefetchFirstImages = useCallback((vms: PostCardVM[]) => {
     const urls = vms
@@ -287,11 +311,10 @@ const FeedScreen: React.FC = () => {
     void fetchFirstPage();
   }, [fetchFirstPage]);
 
-  /* Reacción optimista + reconcilio */
+  /* Reacción optimista + reconciliación */
   const onToggleReact = useCallback(
     async (postId: string, next: boolean) => {
       if (!uid) return;
-
       setCards(prev =>
         prev.map(it =>
           it.id === postId
@@ -303,10 +326,8 @@ const FeedScreen: React.FC = () => {
             : it,
         ),
       );
-
       const final = await togglePostReaction(postId, uid);
       const rc = await countPostReactions(postId);
-
       setCards(prev =>
         prev.map(it =>
           it.id === postId
@@ -334,19 +355,21 @@ const FeedScreen: React.FC = () => {
     [onToggleReact, authorByPostId],
   );
 
-  // acción del composer (navega a crear post)
-  const onComposerPress = useCallback(() => {
-    // ajusta al nombre real de tu ruta si es distinto
-    // navigation.navigate('CreatePost');
-  }, []);
-
   return (
-    <Screen>
-      {/* Composer estilo Facebook */}
-      <FeedComposerBar
-        {...(me.name ? ({ name: me.name } as const) : {})}
-        {...(me.photoURL ? ({ photoURL: me.photoURL } as const) : {})}
-        onPress={onComposerPress}
+    <Screen edges={['bottom']}>
+      {/* Overlay bajo el notch sólo al hacer pull */}
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: insets.top,
+          backgroundColor: theme.colors.background,
+          opacity: notchFadeOpacity as any,
+          zIndex: 2,
+        }}
       />
 
       {loading ? (
@@ -366,7 +389,7 @@ const FeedScreen: React.FC = () => {
           </Text>
           <Button
             mode="contained"
-            onPress={onComposerPress}
+            onPress={() => navigation?.navigate?.('CreatePost')}
             style={{ marginTop: 8 }}
             icon="plus"
           >
@@ -374,11 +397,28 @@ const FeedScreen: React.FC = () => {
           </Button>
         </View>
       ) : (
-        <FlatList
+        <Animated.FlatList
           ref={listRef}
           data={cards}
           keyExtractor={it => it.id}
           renderItem={renderItem}
+          ListHeaderComponent={
+            <Animated.View
+              style={{
+                transform: [
+                  { translateY: bannerTranslateY as any },
+                  { scale: bannerScale as any },
+                ],
+                opacity: bannerOpacity as any,
+              }}
+            >
+              <FeedHeaderBanner />
+              <FeedComposerBar
+                {...(me.photoURL ? ({ photoURL: me.photoURL } as const) : {})}
+                onPress={() => navigation?.navigate?.('CreatePost')}
+              />
+            </Animated.View>
+          }
           ListFooterComponent={
             loadingMore ? (
               <View style={styles.footer}>
@@ -399,8 +439,9 @@ const FeedScreen: React.FC = () => {
             endReachedDuringMomentum.current = false;
           }}
           showsVerticalScrollIndicator={false}
+          contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={{
-            paddingTop: 8,
+            paddingTop: 0,
             paddingHorizontal: 0,
             paddingBottom: 96,
           }}
@@ -408,7 +449,11 @@ const FeedScreen: React.FC = () => {
           maxToRenderPerBatch={8}
           updateCellsBatchingPeriod={50}
           initialNumToRender={10}
-          contentInsetAdjustmentBehavior="automatic"
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: true },
+          )}
+          scrollEventThrottle={16}
         />
       )}
     </Screen>

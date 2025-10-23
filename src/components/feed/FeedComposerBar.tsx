@@ -1,66 +1,50 @@
 import React from 'react';
-import { View, StyleSheet, Image, Pressable } from 'react-native';
+import { Pressable, StyleSheet, View, Image as RNImage } from 'react-native';
 import { Text, useTheme } from 'react-native-paper';
 
 type Props = Readonly<{
-  name?: string;
-  photoURL?: string;
+  photoURL?: string; // solo avatar
   onPress: () => void;
 }>;
 
-const defaultAvatar = require('@assets/images/user.png') as number;
+const fallbackAvatar = require('@assets/images/user.png') as number;
 
-const FeedComposerBar: React.FC<Props> = ({ name, photoURL, onPress }) => {
+const FeedComposerBar: React.FC<Props> = ({ photoURL, onPress }) => {
   const theme = useTheme();
-  const first = (name ?? 'Usuario').split(' ')[0];
-
   return (
-    <Pressable
-      onPress={onPress}
-      style={[
-        styles.wrap,
-        {
-          backgroundColor: theme.colors.surface,
-          borderColor: 'rgba(0,0,0,0.08)',
-        },
-      ]}
-    >
-      <Image
-        source={photoURL ? { uri: photoURL } : (defaultAvatar as number)}
+    <Pressable onPress={onPress} style={styles.container}>
+      <RNImage
+        source={photoURL ? { uri: photoURL } : fallbackAvatar}
         style={styles.avatar}
       />
-      <View style={styles.inputFake}>
-        <Text variant="bodyMedium" style={{ opacity: 0.6 }}>
-          ¿Qué estás pensando, {first}?
-        </Text>
+      <View
+        style={[
+          styles.inputGhost,
+          { backgroundColor: theme.colors.surfaceVariant, opacity: 0.6 },
+        ]}
+      >
+        <Text variant="bodyMedium">¿Qué estás pensando?</Text>
       </View>
     </Pressable>
   );
 };
 
 const styles = StyleSheet.create({
-  wrap: {
+  container: {
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    marginRight: 10,
-    backgroundColor: '#ddd',
-  },
-  inputFake: {
+  avatar: { width: 28, height: 28, borderRadius: 14, marginRight: 8 },
+  // “burbuja” sin borde, como FB
+  inputGhost: {
     flex: 1,
     height: 36,
     borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.15)',
+    paddingHorizontal: 14,
     justifyContent: 'center',
-    paddingHorizontal: 12,
   },
 });
 
