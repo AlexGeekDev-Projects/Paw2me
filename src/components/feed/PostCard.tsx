@@ -1,14 +1,21 @@
-// src/components/feed/PostCard.tsx
-import React, { memo, useMemo, useRef, useState, useCallback } from 'react';
+import React, {
+  memo,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+  useEffect,
+} from 'react';
 import {
   View,
   StyleSheet,
-  Pressable,
   useWindowDimensions,
   PixelRatio,
   Image as RNImage,
   FlatList,
   Modal as RNModal,
+  Animated,
+  Pressable,
   type ListRenderItem,
   type ViewToken,
 } from 'react-native';
@@ -20,7 +27,10 @@ import type { PostCardVM } from '@models/post';
 import { buildCdnUrl, type CdnProvider } from '@utils/cdn';
 import type { ReactionKey } from '@reactions/types';
 
-// Alias único para evitar conflictos de tipos
+// ✅ API nueva de RNGH
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+
+// Alias
 type UIReactionKey = ReactionKey;
 type UIReactionCounts = Readonly<Record<UIReactionKey, number>>;
 
@@ -110,7 +120,445 @@ function at<T>(arr: readonly T[], idx: number): T {
   return v;
 }
 
-/* ───────── Grid tiles ───────── */
+const clamp = (n: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, n));
+
+/* ───────── Util: leer Animated.Value sin __getValue ───────── */
+const useAnimatedNumberRef = (
+  v: Animated.Value,
+): React.MutableRefObject<number> => {
+  const ref = useRef<number>(1);
+  useEffect(() => {
+    const id = v.addListener(({ value }) => {
+      ref.current = typeof value === 'number' ? value : Number(value);
+    });
+    return () => v.removeListener(id);
+  }, [v]);
+  return ref;
+};
+
+/* ───────── Util: límites de desplazamiento dado un scale ───────── */
+const boundsFor = (scale: number, w: number, h: number) => {
+  const maxX = Math.max(0, (w * scale - w) / 2);
+  const maxY = Math.max(0, (h * scale - h) / 2);
+  return { maxX, maxY };
+};
+
+/* ───────── ZoomableImage (Gesture API) ───────── */
+const ZoomableImage: React.FC<
+  Readonly<{ uri: string; width: number; height: number; contain?: boolean }>
+> = ({ uri, width, height, contain = false }) => {
+  const cx = width / 2;
+  const cy = height / 2;
+
+  // escala acumulada + del gesto
+  const base = useRef(new Animated.Value(1)).current;
+  const pinch = useRef(new Animated.Value(1)).current;
+  const baseRef = useAnimatedNumberRef(base);
+  const pinchRef = useAnimatedNumberRef(pinch);
+
+  // pan acumulado + del gesto
+  const panBX = useRef(new Animated.Value(0)).current;
+  const panBY = useRef(new Animated.Value(0)).current;
+  const panGX = useRef(new Animated.Value(0)).current;
+  const panGY = useRef(new Animated.Value(0)).current;
+  const panBXRef = useAnimatedNumberRef(panBX);
+  const panBYRef = useAnimatedNumberRef(panBY);
+  const panGXRef = useAnimatedNumberRef(panGX);
+  const panGYRef = useAnimatedNumberRef(panGY);
+
+  // compensación por foco de pellizco
+  const pinchDX = useRef(new Animated.Value(0)).current;
+  const pinchDY = useRef(new Animated.Value(0)).current;
+  const pinchDXRef = useAnimatedNumberRef(pinchDX);
+  const pinchDYRef = useAnimatedNumberRef(pinchDY);
+
+  const scale = Animated.multiply(base, pinch);
+  const transX = Animated.add(panBX, Animated.add(panGX, pinchDX));
+  const transY = Animated.add(panBY, Animated.add(panGY, pinchDY));
+
+  /* Pinch centrado en el punto del gesto */
+  const pinchG = useMemo(
+    () =>
+      Gesture.Pinch()
+        .onUpdate(e => {
+          const s = e.scale ?? 1;
+          const fx = e.focalX ?? cx;
+          const fy = e.focalY ?? cy;
+
+          pinch.setValue(s);
+
+          // mantener el punto de los dedos quieto
+          const dx = (fx - cx) * (1 - s);
+          const dy = (fy - cy) * (1 - s);
+          pinchDX.setValue(dx);
+          pinchDY.setValue(dy);
+        })
+        .onEnd(() => {
+          const nextScale = clamp(
+            baseRef.current * (pinchRef.current || 1),
+            1,
+            4,
+          );
+          base.setValue(nextScale);
+          pinch.setValue(1);
+
+          // acumular desplazamiento y limitar a los bordes
+          const accX = panBXRef.current + (pinchDXRef.current || 0);
+          const accY = panBYRef.current + (pinchDYRef.current || 0);
+          const { maxX, maxY } = boundsFor(nextScale, width, height);
+          panBX.setValue(clamp(accX, -maxX, maxX));
+          panBY.setValue(clamp(accY, -maxY, maxY));
+          pinchDX.setValue(0);
+          pinchDY.setValue(0);
+        })
+        .runOnJS(true),
+    [
+      cx,
+      cy,
+      width,
+      height,
+      base,
+      pinch,
+      panBX,
+      panBY,
+      pinchDX,
+      pinchDY,
+      baseRef,
+      pinchRef,
+      panBXRef,
+      panBYRef,
+      pinchDXRef,
+      pinchDYRef,
+    ],
+  );
+
+  /* Pan simultáneo (con o sin pinch) */
+  const panG = useMemo(
+    () =>
+      Gesture.Pan()
+        .minPointers(2) // 👈 solo 2 dedos
+        .onUpdate(e => {
+          panGX.setValue(e.translationX ?? 0);
+          panGY.setValue(e.translationY ?? 0);
+        })
+        .onEnd(() => {
+          const curScale = baseRef.current * (pinchRef.current || 1);
+          const { maxX, maxY } = boundsFor(curScale, width, height);
+          const accX = clamp(
+            panBXRef.current + (panGXRef.current || 0),
+            -maxX,
+            maxX,
+          );
+          const accY = clamp(
+            panBYRef.current + (panGYRef.current || 0),
+            -maxY,
+            maxY,
+          );
+          panBX.setValue(accX);
+          panBY.setValue(accY);
+          panGX.setValue(0);
+          panGY.setValue(0);
+        })
+        .runOnJS(true),
+    [
+      width,
+      height,
+      panGX,
+      panGY,
+      panBX,
+      panBY,
+      baseRef,
+      pinchRef,
+      panBXRef,
+      panBYRef,
+      panGXRef,
+      panGYRef,
+    ],
+  );
+
+  /* Doble tap 1x ↔ 2x centrando en el punto tocado */
+  const doubleTap = useMemo(
+    () =>
+      Gesture.Tap()
+        .numberOfTaps(2)
+        .maxDelay(250)
+        .onEnd((e, success) => {
+          if (!success) return;
+          const tx = e?.x ?? cx;
+          const ty = e?.y ?? cy;
+          const target = baseRef.current > 1.02 ? 1 : 2;
+
+          // cálculo de desplazamiento para centrar el tap
+          const { maxX, maxY } = boundsFor(target, width, height);
+          const dx = (tx - cx) * (1 - target);
+          const dy = (ty - cy) * (1 - target);
+          const nextX = clamp(panBXRef.current + dx, -maxX, maxX);
+          const nextY = clamp(panBYRef.current + dy, -maxY, maxY);
+
+          Animated.parallel([
+            Animated.spring(base, {
+              toValue: target,
+              useNativeDriver: true,
+              bounciness: 6,
+              speed: 12,
+            }),
+            Animated.spring(panBX, {
+              toValue: nextX,
+              useNativeDriver: true,
+              bounciness: 0,
+              speed: 18,
+            }),
+            Animated.spring(panBY, {
+              toValue: nextY,
+              useNativeDriver: true,
+              bounciness: 0,
+              speed: 18,
+            }),
+          ]).start();
+        })
+        .runOnJS(true),
+    [base, baseRef, width, height, panBX, panBY, panBXRef, panBYRef, cx, cy],
+  );
+
+  const composed = useMemo(
+    () => Gesture.Simultaneous(pinchG, panG, doubleTap),
+    [pinchG, panG, doubleTap],
+  );
+
+  return (
+    <GestureDetector gesture={composed}>
+      <Animated.View
+        style={{
+          width,
+          height,
+          overflow: 'hidden',
+          backgroundColor: '#000',
+          transform: [
+            { translateX: transX },
+            { translateY: transY },
+            { scale },
+          ],
+        }}
+      >
+        <ImageComponent
+          source={{ uri }}
+          style={{ width: '100%', height: '100%' }}
+          resizeMode={
+            contain
+              ? FastImage
+                ? FastImage.resizeMode.contain
+                : 'contain'
+              : FastImage
+                ? FastImage.resizeMode.cover
+                : 'cover'
+          }
+        />
+      </Animated.View>
+    </GestureDetector>
+  );
+};
+
+/* ───────── ZoomableVideo (mismo patrón) ───────── */
+const ZoomableVideo: React.FC<
+  Readonly<{ uri: string; width: number; height: number }>
+> = ({ uri, width, height }) => {
+  if (!VideoComp) return null;
+
+  const cx = width / 2;
+  const cy = height / 2;
+
+  const base = useRef(new Animated.Value(1)).current;
+  const pinch = useRef(new Animated.Value(1)).current;
+  const baseRef = useAnimatedNumberRef(base);
+  const pinchRef = useAnimatedNumberRef(pinch);
+
+  const panBX = useRef(new Animated.Value(0)).current;
+  const panBY = useRef(new Animated.Value(0)).current;
+  const panGX = useRef(new Animated.Value(0)).current;
+  const panGY = useRef(new Animated.Value(0)).current;
+  const panBXRef = useAnimatedNumberRef(panBX);
+  const panBYRef = useAnimatedNumberRef(panBY);
+  const panGXRef = useAnimatedNumberRef(panGX);
+  const panGYRef = useAnimatedNumberRef(panGY);
+
+  const pinchDX = useRef(new Animated.Value(0)).current;
+  const pinchDY = useRef(new Animated.Value(0)).current;
+  const pinchDXRef = useAnimatedNumberRef(pinchDX);
+  const pinchDYRef = useAnimatedNumberRef(pinchDY);
+
+  const scale = Animated.multiply(base, pinch);
+  const transX = Animated.add(panBX, Animated.add(panGX, pinchDX));
+  const transY = Animated.add(panBY, Animated.add(panGY, pinchDY));
+
+  const pinchG = useMemo(
+    () =>
+      Gesture.Pinch()
+        .onUpdate(e => {
+          const s = e.scale ?? 1;
+          const fx = e.focalX ?? cx;
+          const fy = e.focalY ?? cy;
+          pinch.setValue(s);
+          pinchDX.setValue((fx - cx) * (1 - s));
+          pinchDY.setValue((fy - cy) * (1 - s));
+        })
+        .onEnd(() => {
+          const nextScale = clamp(
+            baseRef.current * (pinchRef.current || 1),
+            1,
+            4,
+          );
+          base.setValue(nextScale);
+          pinch.setValue(1);
+
+          const accX = panBXRef.current + (pinchDXRef.current || 0);
+          const accY = panBYRef.current + (pinchDYRef.current || 0);
+          const { maxX, maxY } = boundsFor(nextScale, width, height);
+          panBX.setValue(clamp(accX, -maxX, maxX));
+          panBY.setValue(clamp(accY, -maxY, maxY));
+          pinchDX.setValue(0);
+          pinchDY.setValue(0);
+        })
+        .runOnJS(true),
+    [
+      cx,
+      cy,
+      width,
+      height,
+      base,
+      pinch,
+      panBX,
+      panBY,
+      pinchDX,
+      pinchDY,
+      baseRef,
+      pinchRef,
+      panBXRef,
+      panBYRef,
+      pinchDXRef,
+      pinchDYRef,
+    ],
+  );
+
+  const panG = useMemo(
+    () =>
+      Gesture.Pan()
+        .minPointers(2) // 👈 solo 2 dedos
+        .onUpdate(e => {
+          panGX.setValue(e.translationX ?? 0);
+          panGY.setValue(e.translationY ?? 0);
+        })
+        .onEnd(() => {
+          const curScale = baseRef.current * (pinchRef.current || 1);
+          const { maxX, maxY } = boundsFor(curScale, width, height);
+          const accX = clamp(
+            panBXRef.current + (panGXRef.current || 0),
+            -maxX,
+            maxX,
+          );
+          const accY = clamp(
+            panBYRef.current + (panGYRef.current || 0),
+            -maxY,
+            maxY,
+          );
+          panBX.setValue(accX);
+          panBY.setValue(accY);
+          panGX.setValue(0);
+          panGY.setValue(0);
+        })
+        .runOnJS(true),
+    [
+      width,
+      height,
+      panGX,
+      panGY,
+      panBX,
+      panBY,
+      baseRef,
+      pinchRef,
+      panBXRef,
+      panBYRef,
+      panGXRef,
+      panGYRef,
+    ],
+  );
+
+  const doubleTap = useMemo(
+    () =>
+      Gesture.Tap()
+        .numberOfTaps(2)
+        .maxDelay(250)
+        .onEnd((e, success) => {
+          if (!success) return;
+          const tx = e?.x ?? cx;
+          const ty = e?.y ?? cy;
+          const target = baseRef.current > 1.02 ? 1 : 2;
+
+          const { maxX, maxY } = boundsFor(target, width, height);
+          const dx = (tx - cx) * (1 - target);
+          const dy = (ty - cy) * (1 - target);
+          const nextX = clamp(panBXRef.current + dx, -maxX, maxX);
+          const nextY = clamp(panBYRef.current + dy, -maxY, maxY);
+
+          Animated.parallel([
+            Animated.spring(base, {
+              toValue: target,
+              useNativeDriver: true,
+              bounciness: 6,
+              speed: 12,
+            }),
+            Animated.spring(panBX, {
+              toValue: nextX,
+              useNativeDriver: true,
+              bounciness: 0,
+              speed: 18,
+            }),
+            Animated.spring(panBY, {
+              toValue: nextY,
+              useNativeDriver: true,
+              bounciness: 0,
+              speed: 18,
+            }),
+          ]).start();
+        })
+        .runOnJS(true),
+    [base, baseRef, width, height, panBX, panBY, panBXRef, panBYRef, cx, cy],
+  );
+
+  const composed = useMemo(
+    () => Gesture.Simultaneous(pinchG, panG, doubleTap),
+    [pinchG, panG, doubleTap],
+  );
+
+  return (
+    <GestureDetector gesture={composed}>
+      <Animated.View
+        style={{
+          width,
+          height,
+          backgroundColor: '#000',
+          transform: [
+            { translateX: transX },
+            { translateY: transY },
+            { scale },
+          ],
+        }}
+      >
+        <VideoComp
+          source={{ uri }}
+          style={{ width: '100%', height: '100%' }}
+          resizeMode="contain"
+          controls
+          repeat
+          paused={false}
+          muted={false}
+        />
+      </Animated.View>
+    </GestureDetector>
+  );
+};
+
+/* ───────── Grid tiles (SIN pinch) ───────── */
 const Tile: React.FC<
   Readonly<{
     item: MediaItem;
@@ -118,11 +566,19 @@ const Tile: React.FC<
     h: number;
     dpr: number;
     overlayPlus?: number;
+    muted: boolean;
+    onToggleMute: () => void;
+    onOpen?: () => void;
   }>
-> = ({ item, w, h, dpr, overlayPlus = 0 }) => {
+> = ({ item, w, h, dpr, overlayPlus = 0, muted, onToggleMute, onOpen }) => {
   const uri = item.type === 'image' ? cdnImg(item.url, w, dpr, 80) : item.url;
+  const isVideo = item.type === 'video';
+
   return (
-    <View style={{ width: w, height: h, backgroundColor: '#000' }}>
+    <Pressable
+      onPress={onOpen}
+      style={{ width: w, height: h, backgroundColor: '#000' }}
+    >
       {item.type === 'image' ? (
         <ImageComponent
           source={{ uri }}
@@ -130,19 +586,30 @@ const Tile: React.FC<
           resizeMode={FastImage ? FastImage.resizeMode.cover : 'cover'}
         />
       ) : VideoComp ? (
-        <VideoComp
-          source={{ uri }}
-          style={{ width: '100%', height: '100%' }}
-          paused
-          muted
-          repeat
-          resizeMode="cover"
-        />
+        <>
+          <VideoComp
+            source={{ uri }}
+            style={{ width: '100%', height: '100%' }}
+            paused
+            muted={muted}
+            repeat
+            resizeMode="cover"
+          />
+          <IconButton
+            icon={muted ? 'volume-off' : 'volume-high'}
+            size={18}
+            onPress={onToggleMute}
+            style={styles.audioBtnSmall}
+            iconColor="#000"
+            accessibilityLabel={muted ? 'Activar audio' : 'Silenciar audio'}
+          />
+        </>
       ) : (
         <View
           style={{ width: '100%', height: '100%', backgroundColor: '#000' }}
         />
       )}
+
       {overlayPlus > 0 ? (
         <View style={styles.plusOverlay}>
           <Text variant="headlineMedium" style={styles.plusText}>
@@ -150,59 +617,69 @@ const Tile: React.FC<
           </Text>
         </View>
       ) : null}
-      {overlayPlus === 0 && item.type === 'video' ? (
+
+      {overlayPlus === 0 && isVideo ? (
         <View style={styles.playBadge}>
           <Text style={styles.playGlyph}>▶︎</Text>
         </View>
       ) : null}
-    </View>
+    </Pressable>
   );
 };
 
+/* ───────── Single media (aquí SÍ hay pinch) ───────── */
 const SingleMedia: React.FC<
   Readonly<{
     item: MediaItem;
     cardW: number;
     dpr: number;
     isVisible?: boolean;
+    muted: boolean;
+    onToggleMute: () => void;
+    onOpenViewer: () => void;
   }>
-> = ({ item, cardW, dpr, isVisible = false }) => {
+> = ({ item, cardW, dpr, isVisible = false, muted, onToggleMute }) => {
   const uri =
     item.type === 'image' ? cdnImg(item.url, cardW, dpr, 90) : item.url;
 
   if (item.type === 'image') {
-    return (
-      <ImageComponent
-        source={{ uri }}
-        style={{ width: '100%', height: '100%' }}
-        resizeMode={FastImage ? FastImage.resizeMode.cover : 'cover'}
-      />
-    );
+    return <ZoomableImage uri={uri} width={cardW} height={cardW} />;
   }
 
+  // Video “preview” del feed (sin pinch aquí, el pinch está en el visor)
   return VideoComp ? (
     <View style={{ width: '100%', height: '100%' }}>
       <VideoComp
         source={{ uri }}
         style={{ width: '100%', height: '100%' }}
-        paused={!isVisible} // autopreview cuando está visible
-        muted
+        paused={!isVisible}
+        muted={muted}
         repeat
         resizeMode="cover"
         controls={false}
       />
+
       {!isVisible ? (
         <View pointerEvents="none" style={styles.playBadgeLarge}>
           <Text style={styles.playGlyphLarge}>▶︎</Text>
         </View>
       ) : null}
+
+      <IconButton
+        icon={muted ? 'volume-off' : 'volume-high'}
+        size={20}
+        onPress={onToggleMute}
+        style={styles.audioBtn}
+        iconColor="#000"
+        accessibilityLabel={muted ? 'Activar audio' : 'Silenciar audio'}
+      />
     </View>
   ) : (
     <View style={{ width: '100%', height: '100%', backgroundColor: '#000' }} />
   );
 };
 
-/* ───────── Componente ───────── */
+/* ───────── Componente principal ───────── */
 const PostCard: React.FC<Props> = ({
   data,
   author,
@@ -226,6 +703,16 @@ const PostCard: React.FC<Props> = ({
     ...videos.map(u => ({ type: 'video' as const, url: u })),
   ];
   const hasMany = media.length > 1;
+
+  // Audio del previo
+  const [previewMuted, setPreviewMuted] = useState<boolean>(true);
+  const [gridMuted, setGridMuted] = useState<boolean>(true);
+
+  // Anti “love fantasma” (para logs en handleReact)
+  const ignoreLoveOnceRef = useRef<boolean>(false);
+  const clearIgnoreLoveOnce = useCallback(() => {
+    ignoreLoveOnceRef.current = false;
+  }, []);
 
   type Pos = Readonly<{
     idx: number;
@@ -304,11 +791,11 @@ const PostCard: React.FC<Props> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasMany, cardW, media.length]);
 
-  /* ───── Visor vertical ───── */
+  /* ───── Visor fullscreen ───── */
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
   const viewerListRef = useRef<FlatList<MediaItem>>(null);
-  const [imgZoomOpen, setImgZoomOpen] = useState(false);
+  const [imgZoomOpen, setImgZoomOpen] = useState(false); // compat
   const [imgZoomUri, setImgZoomUri] = useState<string | null>(null);
 
   const openViewerAt = useCallback((i: number) => {
@@ -336,51 +823,31 @@ const PostCard: React.FC<Props> = ({
     [media.length, pageH],
   );
 
+  // Visor: pinch a TODO (imágenes y videos)
   const renderViewerItem: ListRenderItem<MediaItem> = useCallback(
-    ({ item, index }) => {
+    ({ item }) => {
       if (item.type === 'image') {
         return (
-          <Pressable
-            onPress={() => {
-              if (!ImageViewing) return;
-              setImgZoomUri(item.url);
-              setImgZoomOpen(true);
-            }}
-            style={{
-              width: winW,
-              height: pageH,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: '#000',
-            }}
-          >
-            <ImageComponent
-              source={{ uri: cdnImg(item.url, winW, dpr, 92) }}
-              style={{ width: winW, height: pageH }}
-              resizeMode={FastImage ? FastImage.resizeMode.contain : 'contain'}
+          <View style={{ width: winW, height: pageH, backgroundColor: '#000' }}>
+            <ZoomableImage
+              uri={cdnImg(item.url, winW, dpr, 92)}
+              width={winW}
+              height={pageH}
+              contain
             />
-          </Pressable>
+          </View>
         );
       }
       return (
         <View style={{ width: winW, height: pageH, backgroundColor: '#000' }}>
-          {VideoComp ? (
-            <VideoComp
-              source={{ uri: item.url }}
-              style={{ width: winW, height: pageH }}
-              controls
-              paused={viewerIndex !== index}
-              muted={viewerIndex !== index}
-              resizeMode="contain"
-            />
-          ) : null}
+          <ZoomableVideo uri={item.url} width={winW} height={pageH} />
         </View>
       );
     },
-    [winW, pageH, dpr, viewerIndex],
+    [winW, pageH, dpr],
   );
 
-  /* ───── Footer y conteos (sin “love” fantasma) ───── */
+  /* ───── Footer y conteos ───── */
   const keysAvailable: UIReactionKey[] = availableKeys ?? [
     'like',
     'love',
@@ -401,8 +868,6 @@ const PostCard: React.FC<Props> = ({
     match: 0,
   };
 
-  // Multi: NO sembrar love desde data.reactionCount (evita fantasma)
-  // Legado: solo love toma data.reactionCount
   const countsForFooter: UIReactionCounts = isMulti
     ? { ...zeroCounts, ...(counts ?? {}) }
     : { ...zeroCounts, love: data.reactionCount ?? 0, ...(counts ?? {}) };
@@ -414,18 +879,48 @@ const PostCard: React.FC<Props> = ({
         ? 'love'
         : null;
 
+  // Handler con logs para depurar “love” fantasma
   const handleReact = useCallback(
     (id: string, key: UIReactionKey, active: boolean) => {
+      if (!active) {
+        ignoreLoveOnceRef.current = true;
+        setTimeout(clearIgnoreLoveOnce, 400);
+        if (__DEV__)
+          console.log('[Reactions] onRemove from PostCard.handleReact', {
+            id,
+            key,
+          });
+        if (onReactKey) {
+          void onReactKey(id, null);
+          return;
+        }
+        if (key === 'love' && onToggleReact) {
+          void onToggleReact(id, false);
+        }
+        return;
+      }
+      if (ignoreLoveOnceRef.current && key === 'love') {
+        if (__DEV__)
+          console.log('[Reactions] swallow immediate love after remove', {
+            id,
+          });
+        ignoreLoveOnceRef.current = false;
+        return;
+      }
+      ignoreLoveOnceRef.current = false;
       if (onReactKey) {
-        void onReactKey(id, active ? key : null);
+        void onReactKey(id, key);
         return;
       }
       if (key === 'love' && onToggleReact) {
-        void onToggleReact(id, active);
+        void onToggleReact(id, true);
       }
     },
-    [onReactKey, onToggleReact],
+    [onReactKey, onToggleReact, clearIgnoreLoveOnce],
   );
+
+  /* Single vs grid en feed */
+  const single = !hasMany;
 
   return (
     <Card
@@ -481,31 +976,38 @@ const PostCard: React.FC<Props> = ({
       ) : null}
 
       {/* Media */}
-      {media.length === 0 ? null : hasMany ? (
+      {media.length === 0 ? null : !single ? (
+        // GRID sin pinch
         <View style={[styles.grid, { height: gridH }]}>
-          {positions.map((p, k) => (
-            <Pressable
-              key={`p-${k}`}
-              onPress={() => openViewerAt(p.idx)}
-              style={{
-                position: 'absolute',
-                left: p.x,
-                top: p.y,
-                width: p.w,
-                height: p.h,
-              }}
-            >
-              <Tile
-                item={at(media, p.idx)}
-                w={p.w}
-                h={p.h}
-                dpr={dpr}
-                overlayPlus={p.overlay ?? 0}
-              />
-            </Pressable>
-          ))}
+          {positions.map((p, k) => {
+            const it = at(media, p.idx);
+            return (
+              <View
+                key={`p-${k}`}
+                style={{
+                  position: 'absolute',
+                  left: p.x,
+                  top: p.y,
+                  width: p.w,
+                  height: p.h,
+                }}
+              >
+                <Tile
+                  item={it}
+                  w={p.w}
+                  h={p.h}
+                  dpr={dpr}
+                  overlayPlus={p.overlay ?? 0}
+                  muted={gridMuted}
+                  onToggleMute={() => setGridMuted(m => !m)}
+                  onOpen={() => openViewerAt(p.idx)}
+                />
+              </View>
+            );
+          })}
         </View>
       ) : (
+        // SINGLE (tap simple fuera abre visor)
         <Pressable
           style={{ width: '100%', aspectRatio: 1, backgroundColor: '#000' }}
           onPress={() => openViewerAt(0)}
@@ -515,6 +1017,9 @@ const PostCard: React.FC<Props> = ({
             cardW={cardW}
             dpr={dpr}
             isVisible={!!isVisible}
+            muted={previewMuted}
+            onToggleMute={() => setPreviewMuted(m => !m)}
+            onOpenViewer={() => openViewerAt(0)}
           />
         </Pressable>
       )}
@@ -578,14 +1083,14 @@ const PostCard: React.FC<Props> = ({
                 { paddingTop: insets.top, height: insets.top + HEADER_BAR_H },
               ]}
             >
-              <Pressable
+              <IconButton
+                icon="chevron-left"
+                size={22}
                 onPress={() => setViewerOpen(false)}
                 style={styles.backBtn}
-                accessibilityRole="button"
+                iconColor="#fff"
                 accessibilityLabel="Regresar a la publicación"
-              >
-                <Text style={{ color: '#fff', fontSize: 20 }}>{'‹'}</Text>
-              </Pressable>
+              />
               <ImageComponent
                 source={
                   author?.photoURL
@@ -616,7 +1121,7 @@ const PostCard: React.FC<Props> = ({
             </View>
           </View>
 
-          {/* Zoom de imagen si la lib existe */}
+          {/* (Opcional) compat con react-native-image-viewing */}
           {ImageViewing && imgZoomUri ? (
             <ImageViewing
               images={[{ uri: imgZoomUri }]}
@@ -654,6 +1159,7 @@ const styles = StyleSheet.create({
   authorName: { fontWeight: '700' },
   grid: { position: 'relative', width: '100%', backgroundColor: '#000' },
   footerWrap: { borderTopWidth: StyleSheet.hairlineWidth },
+
   plusOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.45)',
@@ -662,7 +1168,7 @@ const styles = StyleSheet.create({
   },
   plusText: { color: '#fff', fontWeight: '800' },
 
-  // Grid: badge más grande
+  // Grid: insignia play
   playBadge: {
     position: 'absolute',
     bottom: 8,
@@ -692,6 +1198,36 @@ const styles = StyleSheet.create({
   },
   playGlyphLarge: { color: '#fff', fontSize: 30, marginLeft: 4 },
 
+  // Audio estilo IG (blanco)
+  audioBtn: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  audioBtnSmall: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8 + 28 + 6,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+  },
+
   viewerHeaderBar: {
     position: 'absolute',
     top: 0,
@@ -702,6 +1238,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 10,
     backgroundColor: 'rgba(0,0,0,0.35)',
+    height: 44,
   },
   backBtn: {
     width: 34,
@@ -721,7 +1258,7 @@ const styles = StyleSheet.create({
   },
 });
 
-/* memo con props opcionales (exactOptionalPropertyTypes safe) */
+/* memo con props opcionales */
 export default memo(PostCard, (a, b) => {
   const x = a.data,
     y = b.data;

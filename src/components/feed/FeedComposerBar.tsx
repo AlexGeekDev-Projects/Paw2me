@@ -42,7 +42,7 @@ const styles = StyleSheet.create({
   wrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 15,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },

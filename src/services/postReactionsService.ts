@@ -13,6 +13,17 @@ import {
   type FirebaseFirestoreTypes,
 } from '@services/firebase';
 
+import firestoreMod, {
+  // en v22+ existe este export modular:
+  runTransaction as _runTransaction,
+} from '@react-native-firebase/firestore';
+
+const runTx =
+  typeof _runTransaction === 'function'
+    ? _runTransaction
+    : // fallback (versiones antiguas): usa el método namespaced
+      (_: any, fn: any) => firestoreMod().runTransaction(fn);
+
 export type PostReactionKey =
   | 'like'
   | 'love'
@@ -257,9 +268,13 @@ export async function setPostReaction(params: {
 }): Promise<void> {
   const { postId, userId, next } = params;
 
+  if (__DEV__)
+    console.log('[Reactions][svc] TX begin', { postId, userId, next });
+
   assertSelf(userId);
 
-  await getFirestore().runTransaction(
+  await runTx(
+    getFirestore(), // ok: RNFirebase acepta la misma instancia
     async (tx: FirebaseFirestoreTypes.Transaction) => {
       const rRef = reactionDocRef(postId, userId);
       const cRef = countsDocRef(postId);
@@ -324,6 +339,23 @@ export async function setPostReaction(params: {
         { merge: true },
       );
 
+      if (__DEV__)
+        console.log('[Reactions][svc] TX begin', { postId, userId, next });
+
+      if (__DEV__)
+        console.log('[Reactions][svc] TX write', {
+          postId,
+          userId,
+          prev: prev?.key ?? null,
+          next,
+          like,
+          love,
+          happy,
+          sad,
+          wow,
+          angry,
+        });
+
       // guarda/elimina reacción
       if (next) {
         const payload: PostReactionDoc = {
@@ -336,9 +368,23 @@ export async function setPostReaction(params: {
         tx.set(rRef, payload);
       } else {
         tx.delete(rRef);
+        if (__DEV__)
+          console.log('[Reactions][svc] TX write', {
+            postId,
+            userId,
+            prev: prev?.key ?? null,
+            next,
+            like,
+            love,
+            happy,
+            sad,
+            wow,
+            angry,
+          });
       }
     },
   );
+  if (__DEV__) console.log('[Reactions][svc] TX end', { postId, userId, next });
 }
 
 /** Cambia a una clave concreta (o la quita si ya estaba). Devuelve la clave final o null. */

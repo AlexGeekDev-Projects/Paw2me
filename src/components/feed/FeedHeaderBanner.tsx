@@ -20,8 +20,9 @@ const FeedHeaderBanner: React.FC = () => {
 
 const styles = StyleSheet.create({
   wrap: {
+    paddingTop: 12,
     height: 52,
-    paddingLeft: 12, // leve margen izquierdo (coincide con posts/composer)
+    paddingLeft: 15, // leve margen izquierdo (coincide con posts/composer)
     backgroundColor: 'transparent',
   },
   img: {

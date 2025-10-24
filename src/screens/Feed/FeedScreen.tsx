@@ -146,11 +146,13 @@ const FeedScreen: React.FC = () => {
   const theme = useTheme();
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
+  const loveCooloffRef = useRef<Record<string, number>>({});
+  const loveBlockUntilRef = useRef<Record<string, number>>({});
 
   const auth = getAuth();
   const uid = auth.currentUser?.uid ?? null;
 
-  // 🔸 Animated scroll para efectos del header
+  // Animated scroll para efectos del header
   const scrollY = useRef(new Animated.Value(0)).current;
 
   const bannerScale = scrollY.interpolate({
@@ -182,7 +184,7 @@ const FeedScreen: React.FC = () => {
     {},
   );
 
-  // 🔒 Reacciones (estado por post)
+  // Reacciones (estado por post)
   const [currentByPostId, setCurrentByPostId] = useState<
     Record<string, PostReactionKey | null>
   >({});
@@ -383,31 +385,69 @@ const FeedScreen: React.FC = () => {
 
   /* ---------- Reacciones: handler exacto (PostReactionKey) ---------- */
   const handleReactKeyExact = useCallback(
-    async (postId: string, nextKey: PostReactionKey | null) => {
+    async (
+      postId: string,
+      incomingNext: PostReactionKey | null,
+    ): Promise<void> => {
       if (!uid) return;
 
       const prevKey: PostReactionKey | null = currentByPostId?.[postId] ?? null;
-      const delta = (nextKey ? 1 : 0) - (prevKey ? 1 : 0); // +1,0,-1
 
-      // 0) Optimista: evita “love” fantasma
+      // No-op: si no cambia nada, salimos
+      if (prevKey === incomingNext) {
+        if (__DEV__) console.log('[Reactions] FEED no-op', { postId, prevKey });
+        return;
+      }
+
+      // ── Bloqueo anti “love” fantasma:
+      // cuando se quita cualquier reacción, bloqueamos "love" por ~650ms.
+      const now = Date.now();
+      if (incomingNext === null) {
+        loveCooloffRef.current[postId] = now + 650;
+      } else if (
+        incomingNext === 'love' &&
+        now < (loveCooloffRef.current[postId] ?? 0)
+      ) {
+        if (__DEV__) {
+          console.log('[Reactions] FEED swallow love (cooldown active)', {
+            postId,
+            prevKey,
+          });
+        }
+        return; // ignoramos este love “rebote”
+      }
+
+      const nextKey: PostReactionKey | null = incomingNext;
+      const delta = (nextKey ? 1 : 0) - (prevKey ? 1 : 0); // +1/0/-1
+
+      if (__DEV__) {
+        console.log('[Reactions] FEED START', {
+          postId,
+          prevKey,
+          nextKey,
+          delta,
+        });
+      }
+
+      // ── OPTIMISTA: PostCard
       setCards(prev =>
         prev.map(it =>
           it.id === postId
             ? {
                 ...it,
                 reactedByMe: nextKey === 'love',
-                reactionCount: Math.max(0, it.reactionCount + delta),
+                reactionCount: Math.max(0, (it.reactionCount ?? 0) + delta),
               }
             : it,
         ),
       );
 
-      // 1) estado inmediato
+      // ── OPTIMISTA: clave actual
       setCurrentByPostId(prev => ({ ...prev, [postId]: nextKey }));
 
-      // 2) optimista en contadores por clave
+      // ── OPTIMISTA: contadores por clave
       setCountsByPostId(prev => {
-        const base = prev[postId] ?? {
+        const base: ReactionCounts = prev[postId] ?? {
           like: 0,
           love: 0,
           happy: 0,
@@ -418,11 +458,31 @@ const FeedScreen: React.FC = () => {
         const next = { ...base };
         if (prevKey) next[prevKey] = Math.max(0, (next[prevKey] ?? 0) - 1);
         if (nextKey) next[nextKey] = (next[nextKey] ?? 0) + 1;
+
+        if (__DEV__) {
+          console.log('[Reactions][svc] TX write', {
+            postId,
+            userId: uid,
+            prev: String(prevKey),
+            next: String(nextKey),
+            ...next,
+          });
+        }
+
         return { ...prev, [postId]: next };
       });
 
-      // 3) persistencia + reconciliación
-      await setMyReactionKey(postId, nextKey);
+      // ── PERSISTENCIA
+      if (__DEV__)
+        console.log('[Reactions][svc] TX begin', { postId, next: nextKey });
+      try {
+        await setMyReactionKey(postId, nextKey);
+      } finally {
+        if (__DEV__)
+          console.log('[Reactions][svc] TX end', { postId, next: nextKey });
+      }
+
+      // ── RECONCILIACIÓN (estado real en servidor)
       const [finalKey, finalCounts] = await Promise.all([
         uid ? getUserPostReacted(postId, uid) : Promise.resolve(null),
         getPostReactionCounts(postId),
@@ -446,8 +506,16 @@ const FeedScreen: React.FC = () => {
             : it,
         ),
       );
+
+      if (__DEV__) {
+        console.log('[Reactions] FEED FINAL', {
+          postId,
+          finalKey: finalKey ?? null,
+          finalCounts,
+        });
+      }
     },
-    [uid, currentByPostId],
+    [uid, currentByPostId, setMyReactionKey],
   );
 
   /* Adaptador UI (filtra "match") */
