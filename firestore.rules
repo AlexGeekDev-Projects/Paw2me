@@ -16,6 +16,32 @@ service cloud.firestore {
         && g.lat >= -90 && g.lat <= 90
         && g.lng >= -180 && g.lng <= 180;
     }
+    
+    // Posts generales en raíz
+    match /posts/{postId} {
+      allow read: if true;
+
+      allow create: if isSignedIn()
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.status in ['active','hidden'];
+
+      allow update, delete: if isOwner(resource.data.authorUid) || isModerator();
+      
+       match /meta/{docId} {
+        allow read: if true;
+        allow create, update: if isSignedIn() && docId == "reactionCounts";
+      }
+
+      match /reactions/{uid} {
+        allow read: if true;
+        allow create, update, delete: if isSignedIn() && request.auth.uid == uid;
+      }
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if isSignedIn() && request.resource.data.authorUid == request.auth.uid;
+        allow update, delete: if isOwner(resource.data.authorUid) || isModerator();
+      }
+    }
 
     match /paws/{pawId} {
       allow read: if true;
@@ -44,27 +70,21 @@ service cloud.firestore {
 
       allow delete: if isOwner(resource.data.ownerUid) || isModerator();
 
-      // -- N U E V O S  S U B C O L E C C I O N E S  D E  R E A C C I O N E S --
-
-      // cada usuario sólo puede escribir su propia reacción
       match /reactions/{uid} {
         allow read: if true;
         allow create, update, delete: if isSignedIn() && request.auth.uid == uid;
       }
 
-      // acumulado de reacciones (lo actualiza el cliente en una transacción)
       match /meta/{docId} {
         allow read: if true;
         allow create, update: if isSignedIn() && docId == "reactionCounts";
       }
 
-      // match del usuario con la huellita
       match /matches/{uid} {
         allow read: if isSignedIn();
         allow create, update, delete: if isSignedIn() && request.auth.uid == uid;
       }
 
-      // (ya tenías posts)
       match /posts/{postId} {
         allow read: if true;
 
@@ -93,9 +113,7 @@ service cloud.firestore {
       allow create: if isOwner(uid);
       allow update, delete: if isOwner(uid) || isModerator();
       
-      // 👇 NUEVO: espejo de matches para el usuario
       match /matches/{pawId} {
-        // sólo el dueño puede leer/escribir sus propios matches
         allow read: if isOwner(uid) || isModerator();
         allow create, update, delete: if isOwner(uid);
       }

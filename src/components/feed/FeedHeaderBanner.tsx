@@ -24,6 +24,7 @@ const styles = StyleSheet.create({
     height: 52,
     paddingLeft: 15, // leve margen izquierdo (coincide con posts/composer)
     backgroundColor: 'transparent',
+    marginBottom: 10,
   },
   img: {
     width: 118,

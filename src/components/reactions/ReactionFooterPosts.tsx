@@ -91,7 +91,8 @@ const ReactionSummary: React.FC<
           );
         })}
       </View>
-      <Text variant="labelMedium" style={styles.summaryText}>
+      {/* ↑ Contador de reacciones más grande y en negrita */}
+      <Text variant="labelLarge" style={styles.summaryText}>
         {total}
       </Text>
     </View>
@@ -201,6 +202,26 @@ const ReactionFooterPosts: React.FC<ReactionFooterProps> = ({
     return out;
   }, [countsBase, currentLocal]);
 
+  const reactionTotal = useMemo(
+    () => RX.reduce((sum, r) => sum + (countsOptimistic[r.key] ?? 0), 0),
+    [RX, countsOptimistic],
+  );
+
+  const rightItems = useMemo(() => {
+    const arr: string[] = [];
+    if (commentsCount > 0) {
+      arr.push(
+        `${commentsCount} ${commentsCount === 1 ? 'comentario' : 'comentarios'}`,
+      );
+    }
+    if (sharesCount > 0) {
+      arr.push(
+        `${sharesCount} ${sharesCount === 1 ? 'compartido' : 'compartidos'}`,
+      );
+    }
+    return arr;
+  }, [commentsCount, sharesCount]);
+
   const currentMeta = useMemo(
     () =>
       currentLocal
@@ -208,6 +229,9 @@ const ReactionFooterPosts: React.FC<ReactionFooterProps> = ({
         : null,
     [currentLocal],
   );
+
+  const rightLabel = useMemo(() => rightItems.join('  •  '), [rightItems]);
+  const showTopRow = reactionTotal > 0 || rightItems.length > 0;
 
   const weight: TextStyle['fontWeight'] = currentLocal ? '700' : '500';
 
@@ -269,26 +293,38 @@ const ReactionFooterPosts: React.FC<ReactionFooterProps> = ({
 
   return (
     <View ref={wrapRef} collapsable={false} style={styles.wrap}>
-      <View style={styles.topRow}>
-        <Pressable
-          onPress={() => setBreakdownOpen(true)}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel="Ver desglose de reacciones"
-          style={styles.summaryWrap}
-        >
-          <ReactionSummary
-            counts={countsOptimistic}
-            {...(availableKeys ? ({ availableKeys } as const) : {})}
-          />
-        </Pressable>
+      {showTopRow ? (
+        <View style={styles.topRow}>
+          <Pressable
+            onPress={() => setBreakdownOpen(true)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Ver desglose de reacciones"
+            style={styles.summaryWrap}
+          >
+            <ReactionSummary
+              counts={countsOptimistic}
+              {...(availableKeys ? ({ availableKeys } as const) : {})}
+            />
+          </Pressable>
 
-        <Text variant="labelSmall" style={styles.topStats}>
-          {commentsCount > 0 ? `${commentsCount} comentarios` : ''}
-          {commentsCount > 0 && sharesCount > 0 ? '  •  ' : ''}
-          {sharesCount > 0 ? `Compartido ${sharesCount}` : ''}
-        </Text>
-      </View>
+          {/* Texto derecho solo si hay items (comentarios/compartidos) */}
+          {rightItems.length > 0 ? (
+            <Pressable
+              hitSlop={6}
+              onPress={() => onCommentPress?.(id)}
+              accessibilityRole="button"
+              accessibilityLabel="Ver comentarios"
+              style={styles.rightStats}
+            >
+              {/* ↑ Contadores de comentarios/compartidos más grandes y en negrita */}
+              <Text variant="labelLarge" style={styles.rightStatsText}>
+                {rightLabel}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
       <View style={styles.actionsRow}>
         <GestureDetector gesture={combo}>
@@ -392,8 +428,19 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     borderWidth: 0,
   },
-  summaryText: { marginLeft: 6, fontWeight: '700' },
-  topStats: { marginLeft: 'auto', opacity: 0.7 },
+  // ↑ Más grande y negrita para el total de reacciones
+  summaryText: { marginLeft: 6, fontWeight: '700', fontSize: 14 },
+  rightStats: {
+    marginLeft: 'auto',
+    flexShrink: 1,
+  },
+  // ↑ Más grande y negrita para comentarios/compartidos
+  rightStatsText: {
+    opacity: 0.9,
+    textAlign: 'right',
+    fontWeight: '700',
+    fontSize: 14,
+  },
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',

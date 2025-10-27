@@ -1,4 +1,11 @@
-import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+} from 'react';
 import {
   View,
   StyleSheet,
@@ -6,11 +13,17 @@ import {
   Animated,
   useWindowDimensions,
   PixelRatio,
+  Share,
 } from 'react-native';
 import type { LayoutChangeEvent } from 'react-native';
 import { Card, Text, useTheme, Chip } from 'react-native-paper';
-import { PawIconAnimated } from '@components/feedback/Loading'; // ← ✅ huellita
+import { PawIconAnimated } from '@components/feedback/Loading';
 import { useAnimalReactions } from '@hooks/useAnimalReactions';
+
+import AnimalCommentsDrawer from '@components/comments/AnimalCommentsDrawer';
+import ReactionFooter from '@components/reactions/ReactionFooter';
+
+import { useAnimalCommentsCount } from '@hooks/useAnimalCommentsCount';
 
 import type { AnimalCardVM } from '@models/animal';
 import {
@@ -21,9 +34,7 @@ import {
   title,
 } from '@utils/media';
 import { buildCdnUrl, type CdnProvider } from '@utils/cdn';
-import ReactionFooter from '@components/reactions/ReactionFooter';
 
-/** ─ helpers ─ */
 type Props = Readonly<{ data: AnimalCardVM; onPress?: (id: string) => void }>;
 type OptionalFields = Readonly<{
   coverUrl?: string | null;
@@ -54,8 +65,6 @@ const MaybeGradient = (() => {
   }
 })();
 
-type BreedSize = Readonly<{ breed?: string; size?: string }>;
-
 const SIZE_WORDS = new Set(
   [
     'xs',
@@ -83,7 +92,7 @@ const SIZE_WORDS = new Set(
   ].map(s => s.toLowerCase()),
 );
 
-function normalizeSize(input?: string | null): string | undefined {
+const normalizeSize = (input?: string | null): string | undefined => {
   const t = str(input)?.toLowerCase();
   if (!t) return undefined;
   if (
@@ -110,10 +119,9 @@ function normalizeSize(input?: string | null): string | undefined {
   )
     return 'Grande';
   return title(t) ?? t;
-}
+};
 
-/** Devuelve SOLO claves definidas (compat. exactOptionalPropertyTypes) */
-function extractFromChips(chips?: readonly string[] | null): BreedSize {
+const extractFromChips = (chips?: readonly string[] | null) => {
   if (!Array.isArray(chips)) return {};
   const clean = chips.map(s => s.trim()).filter(Boolean);
   const rawSize = clean.find(s => SIZE_WORDS.has(s.toLowerCase()));
@@ -123,27 +131,26 @@ function extractFromChips(chips?: readonly string[] | null): BreedSize {
   return {
     ...(breedV ? { breed: breedV } : {}),
     ...(sizeV ? { size: sizeV } : {}),
-  } as BreedSize;
-}
+  } as Readonly<{ breed?: string; size?: string }>;
+};
 
-/** ─ consts ─ */
 const FADE_MS = 220;
 const THUMB_FADE_MS = 120;
 const SPINNER_DELAY_MS = 120;
-
 const MIN_GRADIENT_H = 56;
 const PAD_V = 8;
-
 const PROVIDER: CdnProvider = 'auto';
 
-/** ─ component ─ */
 const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
   const theme = useTheme();
   const { width: winW } = useWindowDimensions();
+
+  // auth → userId para comentar
   const { useAuth } = require('@hooks/useAuth');
   const auth = typeof useAuth === 'function' ? useAuth() : undefined;
   const userId: string | null = auth?.user?.uid ?? null;
 
+  // Reacciones
   const { counts, current, react } = useAnimalReactions(data.id, userId);
 
   const opt = data as OptionalFields;
@@ -155,14 +162,30 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
   const size: string | undefined =
     normalizeSize(str(opt.size)) ?? inferred.size;
 
-  const comments =
+  // Contadores (local optimista)
+  const commentsInitial =
     typeof opt.comments === 'number' && Number.isFinite(opt.comments)
       ? opt.comments
       : 0;
-  const shares =
-    typeof opt.shares === 'number' && Number.isFinite(opt.shares)
-      ? opt.shares
+  const sharesInitial =
+    typeof (data as any).shares === 'number' &&
+    Number.isFinite((data as any).shares)
+      ? (data as any).shares
       : 0;
+
+  const commentsCount = useAnimalCommentsCount(data.id);
+  const sharesCount = sharesInitial;
+
+  const handleShare = useCallback(async () => {
+    try {
+      await Share.share({ message: `Mira esta huellita 🐾` });
+    } catch {}
+  }, []);
+
+  // Cajón de comentarios
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const openComments = useCallback(() => setCommentsOpen(true), []);
+  const closeComments = useCallback(() => setCommentsOpen(false), []);
 
   const cardW = useMemo(() => winW - 24, [winW]);
   const dpr = PixelRatio.get();
@@ -257,14 +280,10 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
 
   // Overlay: altura = contenido + padding
   const [contentH, setContentH] = useState<number>(40);
-  const gradientH = Math.max(
-    MIN_GRADIENT_H,
-    Math.ceil(contentH + PAD_V * 2 + 6),
-  );
+  const gradientH = Math.max(56, Math.ceil(contentH + PAD_V * 2 + 6));
   const onContentLayout = (e: LayoutChangeEvent): void =>
     setContentH(e.nativeEvent.layout.height);
 
-  // Chips adaptados a tema
   const chipBg = theme.dark
     ? 'rgba(255,255,255,0.14)'
     : 'rgba(255,255,255,0.94)';
@@ -306,7 +325,6 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
             />
           ) : null}
 
-          {/* Gradiente */}
           {MaybeGradient ? (
             <MaybeGradient
               colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.58)']}
@@ -320,7 +338,7 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
             />
           )}
 
-          {/* Contenido */}
+          {/* Contenido inferior */}
           <View
             style={[styles.bottomContent, { paddingVertical: PAD_V }]}
             onLayout={onContentLayout}
@@ -334,7 +352,6 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
               >
                 {data.name}
               </Text>
-
               {(breed || size) && (
                 <View style={styles.titleChipsRow}>
                   {breed ? (
@@ -366,14 +383,12 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
                 </View>
               )}
             </View>
-
             <Text variant="bodySmall" numberOfLines={1} style={styles.subtitle}>
               {data.species}
               {data.city ? ` • ${data.city}` : ''}
             </Text>
           </View>
 
-          {/* 🔵 Huellita de carga centrada (recuperada) */}
           {isLoading && showSpinner ? (
             <View style={styles.center} pointerEvents="none" accessible={false}>
               <View style={styles.pawBadge}>
@@ -395,12 +410,24 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
           if (key !== 'love' && key !== 'sad' && key !== 'match') return;
           await react(active ? key : null);
         }}
+        commentsCount={commentsCount}
+        sharesCount={sharesCount}
+        onCommentPress={() => openComments()}
+        onSharePress={handleShare}
+      />
+
+      {/* Cajón de comentarios */}
+      <AnimalCommentsDrawer
+        visible={commentsOpen}
+        animalId={data.id}
+        userId={userId}
+        onClose={closeComments}
+        onDismiss={closeComments}
       />
     </Card>
   );
 };
 
-/** ─ styles & memo ─ */
 const styles = StyleSheet.create({
   card: {
     marginHorizontal: 12,
@@ -426,7 +453,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
     zIndex: 1,
   },
-
   bottomContent: {
     position: 'absolute',
     left: 12,
@@ -462,7 +488,7 @@ const styles = StyleSheet.create({
   pawBadge: {
     padding: 10,
     borderRadius: 24,
-    backgroundColor: 'rgba(0,0,0,0.25)', // contraste leve sobre la foto
+    backgroundColor: 'rgba(0,0,0,0.25)',
   },
 
   topBorder: {

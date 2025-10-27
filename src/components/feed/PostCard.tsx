@@ -92,6 +92,9 @@ type Props = Readonly<{
 
   /** Visibilidad en feed (para autopreview de single video) */
   isVisible?: boolean | undefined;
+
+  onCommentPress?: (postId: string) => void;
+  onSharePress?: (postId: string) => void;
 }>;
 
 const PROVIDER: CdnProvider = 'auto';
@@ -122,6 +125,16 @@ function at<T>(arr: readonly T[], idx: number): T {
 
 const clamp = (n: number, min: number, max: number) =>
   Math.max(min, Math.min(max, n));
+
+/* Corta por palabra y añade “…” si supera el límite */
+const clampAtWord = (text: string, limit: number): string => {
+  if (!text) return '';
+  if (text.length <= limit) return text;
+  const slice = text.slice(0, limit);
+  const cut = slice.lastIndexOf(' ');
+  const base = cut > Math.floor(limit * 0.6) ? slice.slice(0, cut) : slice;
+  return base.replace(/[.,;:!?]+$/, '') + '…';
+};
 
 /* ───────── Util: leer Animated.Value sin __getValue ───────── */
 const useAnimatedNumberRef = (
@@ -689,6 +702,8 @@ const PostCard: React.FC<Props> = ({
   availableKeys,
   onReactKey,
   isVisible,
+  onCommentPress, // 👈
+  onSharePress,
 }) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -713,6 +728,17 @@ const PostCard: React.FC<Props> = ({
   const clearIgnoreLoveOnce = useCallback(() => {
     ignoreLoveOnceRef.current = false;
   }, []);
+
+  // Ver más / Ver menos
+  const [expanded, setExpanded] = useState(false);
+  const MAX_PREVIEW_CHARS = 100; // ajustable
+  const contentRaw = data.content ?? '';
+  const needsClamp = contentRaw.length > MAX_PREVIEW_CHARS;
+  const previewText = useMemo(
+    () =>
+      needsClamp ? clampAtWord(contentRaw, MAX_PREVIEW_CHARS) : contentRaw,
+    [contentRaw, needsClamp],
+  );
 
   type Pos = Readonly<{
     idx: number;
@@ -971,7 +997,33 @@ const PostCard: React.FC<Props> = ({
       {/* Texto */}
       {data.content ? (
         <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
-          <Text variant="bodyLarge">{data.content}</Text>
+          {!expanded && needsClamp ? (
+            <Text variant="bodyLarge">
+              {previewText}
+              <Text
+                style={[styles.seeMore, { color: theme.colors.primary }]}
+                onPress={() => setExpanded(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Ver más del texto"
+              >
+                {'  Ver más'}
+              </Text>
+            </Text>
+          ) : (
+            <Text variant="bodyLarge">
+              {contentRaw}
+              {needsClamp ? (
+                <Text
+                  style={[styles.seeLess, { color: theme.colors.primary }]}
+                  onPress={() => setExpanded(false)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Ver menos del texto"
+                >
+                  {'  Ver menos'}
+                </Text>
+              ) : null}
+            </Text>
+          )}
         </View>
       ) : null}
 
@@ -1042,6 +1094,8 @@ const PostCard: React.FC<Props> = ({
           onReact={handleReact}
           commentsCount={data.commentCount}
           sharesCount={data.shareCount}
+          {...(onCommentPress ? ({ onCommentPress } as const) : {})} // ✅ solo si existe
+          {...(onSharePress ? ({ onSharePress } as const) : {})}
         />
       </View>
 
@@ -1256,6 +1310,10 @@ const styles = StyleSheet.create({
     marginRight: 8,
     backgroundColor: '#333',
   },
+
+  // Ver más / Ver menos
+  seeMore: { fontWeight: '700' },
+  seeLess: { fontWeight: '600', opacity: 0.9 },
 });
 
 /* memo con props opcionales */

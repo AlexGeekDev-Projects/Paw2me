@@ -278,11 +278,24 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
 
   const combo = useMemo(() => Gesture.Race(tap, pan), [pan, tap]);
 
+  const rightLabel = useMemo(() => {
+    const parts: string[] = [];
+    if (commentsCount > 0)
+      parts.push(
+        `${commentsCount} ${commentsCount === 1 ? 'comentario' : 'comentarios'}`,
+      );
+    if (sharesCount > 0)
+      parts.push(
+        `${sharesCount === 1 ? '1 compartido' : `${sharesCount} compartidos`}`,
+      );
+    return parts.join('  •  ');
+  }, [commentsCount, sharesCount]);
+
   return (
     <View ref={wrapRef} collapsable={false} style={styles.wrap}>
       {/* Resumen estilo FB */}
       <View style={styles.topRow}>
-        {/** Sólo si hay reacciones: el resumen ya devuelve null si total===0 */}
+        {/* Burbujas (abre breakdown) */}
         <Pressable
           onPress={() => setBreakdownOpen(true)}
           hitSlop={8}
@@ -296,11 +309,21 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
           />
         </Pressable>
 
-        <Text variant="labelSmall" style={styles.topStats}>
-          {commentsCount > 0 ? `${commentsCount} comentarios` : ''}
-          {commentsCount > 0 && sharesCount > 0 ? '  •  ' : ''}
-          {sharesCount > 0 ? `Compartido ${sharesCount}` : ''}
-        </Text>
+        {/* Contador (abre comentarios) */}
+        {rightLabel.length > 0 ? (
+          <Pressable
+            style={styles.topStatsPress}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel="Ver comentarios"
+            onStartShouldSetResponder={() => true}
+            onPress={() => onCommentPress?.(id)}
+          >
+            <Text variant="labelSmall" style={styles.topStatsText}>
+              {rightLabel}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {/* Acciones distribuidas a tercios (más compacto) */}
@@ -396,6 +419,8 @@ const styles = StyleSheet.create({
     marginBottom: 2,
     minHeight: 18,
   },
+  topStatsPress: { marginLeft: 'auto' }, // empuja a la derecha y hace el área clicable
+  topStatsText: { opacity: 0.7, textAlign: 'right' },
   summaryWrap: { flexDirection: 'row', alignItems: 'center' },
 
   bubbles: { position: 'relative', height: 16 },

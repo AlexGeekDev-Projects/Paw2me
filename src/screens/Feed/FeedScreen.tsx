@@ -20,7 +20,10 @@ import PostCard from '@components/feed/PostCard';
 import FeedHeaderBanner from '@components/feed/FeedHeaderBanner';
 import FeedComposerBar from '@components/feed/FeedComposerBar';
 
+import CommentsSheet from '@components/comments/CommentsSheet';
+
 import { listPostsPublic, toPostVM } from '@services/postsService';
+import { getCommentsCount } from '@services/postCommentsService';
 import {
   getUserReacted as getUserPostReacted,
   getReactionCounts as getPostReactionCounts,
@@ -94,6 +97,7 @@ const AnimatedPostItem: React.FC<{
     key: UIReactionKey | null,
   ) => void | Promise<void>;
   isVisible: boolean;
+  onCommentPress: (postId: string) => void;
 }> = ({
   item,
   index,
@@ -103,6 +107,7 @@ const AnimatedPostItem: React.FC<{
   counts,
   onReactKey,
   isVisible,
+  onCommentPress,
 }) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(8)).current;
@@ -136,6 +141,7 @@ const AnimatedPostItem: React.FC<{
         onReactKey={onReactKey}
         availableKeys={['like', 'love', 'happy', 'sad', 'wow', 'angry']}
         isVisible={isVisible}
+        onCommentPress={onCommentPress}
       />
     </Animated.View>
   );
@@ -148,6 +154,7 @@ const FeedScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const loveCooloffRef = useRef<Record<string, number>>({});
   const loveBlockUntilRef = useRef<Record<string, number>>({});
+  const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null);
 
   const auth = getAuth();
   const uid = auth.currentUser?.uid ?? null;
@@ -204,6 +211,10 @@ const FeedScreen: React.FC = () => {
   const listRef = useRef<RNFlatList<PostCardVM>>(null);
   const lastLoadMoreAtRef = useRef(0);
   const endReachedDuringMomentum = useRef(false);
+
+  const openComments = useCallback((postId: string) => {
+    setOpenCommentsFor(postId);
+  }, []);
 
   // cargar mi usuario (para composer)
   useEffect(() => {
@@ -286,15 +297,18 @@ const FeedScreen: React.FC = () => {
 
       const vms: PostCardVM[] = await Promise.all(
         items.map(async (p: PostDoc) => {
-          const [myKey, counts] = await Promise.all([
+          const [myKey, counts, cmtCount] = await Promise.all([
             uid ? getUserPostReacted(p.id, uid) : Promise.resolve(null),
             getPostReactionCounts(p.id),
+            getCommentsCount(p.id), // ✅ NUEVO
           ]);
+
           const rcTotal = sumCounts(counts);
           const vm = toPostVM(
-            { ...p, reactionCount: rcTotal },
+            { ...p, reactionCount: rcTotal, commentCount: cmtCount }, // ✅ INYECTA
             myKey === 'love',
           );
+
           setCurrentByPostId(prev => ({ ...prev, [p.id]: myKey }));
           setCountsByPostId(prev => ({ ...prev, [p.id]: counts }));
           return vm;
@@ -329,15 +343,18 @@ const FeedScreen: React.FC = () => {
 
       const vms: PostCardVM[] = await Promise.all(
         items.map(async (p: PostDoc) => {
-          const [myKey, counts] = await Promise.all([
+          const [myKey, counts, cmtCount] = await Promise.all([
             uid ? getUserPostReacted(p.id, uid) : Promise.resolve(null),
             getPostReactionCounts(p.id),
+            getCommentsCount(p.id), // ✅ NUEVO
           ]);
+
           const rcTotal = sumCounts(counts);
           const vm = toPostVM(
-            { ...p, reactionCount: rcTotal },
+            { ...p, reactionCount: rcTotal, commentCount: cmtCount }, // ✅ INYECTA
             myKey === 'love',
           );
+
           setCurrentByPostId(prev => ({ ...prev, [p.id]: myKey }));
           setCountsByPostId(prev => ({ ...prev, [p.id]: counts }));
           return vm;
@@ -583,6 +600,7 @@ const FeedScreen: React.FC = () => {
           {...(counts ? ({ counts } as const) : {})}
           onReactKey={handleReactKeyUI}
           isVisible={isVisible}
+          onCommentPress={openComments}
         />
       );
     },
@@ -593,6 +611,7 @@ const FeedScreen: React.FC = () => {
       countsByPostId,
       handleReactKeyUI,
       visibleMap,
+      openComments,
     ],
   );
 
@@ -708,6 +727,11 @@ const FeedScreen: React.FC = () => {
           viewabilityConfig={viewabilityConfig}
         />
       )}
+      <CommentsSheet
+        visible={openCommentsFor !== null}
+        postId={openCommentsFor ?? ''} // seguro
+        onDismiss={() => setOpenCommentsFor(null)}
+      />
     </Screen>
   );
 };
