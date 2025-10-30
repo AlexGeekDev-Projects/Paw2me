@@ -1,6 +1,6 @@
 // src/components/explore/ExploreTopBar.tsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Image } from 'react-native';
 import {
   IconButton,
   Searchbar,
@@ -12,7 +12,7 @@ import {
 } from 'react-native-paper';
 
 export type ExploreTopBarProps = Readonly<{
-  title?: string;
+  title?: string; // ya no se usa visualmente; se deja por compatibilidad
   searchOpen: boolean;
   onOpenSearch: () => void;
   onCloseSearch: () => void;
@@ -20,6 +20,7 @@ export type ExploreTopBarProps = Readonly<{
   onCommitQuery: (q: string) => void;
   onOpenFilters: () => void;
   onClearFilters: () => void;
+  onOpenMatches?: () => void;
   hasActiveFilters: boolean;
   activeFiltersCount?: number;
 
@@ -48,6 +49,8 @@ const applyAlpha = (color: string, a: number) => {
   return m ? `rgba(${m[1]}, ${m[2]}, ${m[3]}, ${a})` : color;
 };
 
+const bannerImg = require('@assets/images/Paw2MeBanner.png') as number;
+
 const ExploreTopBar: React.FC<ExploreTopBarProps> = ({
   title = 'Paw2me',
   searchOpen,
@@ -57,6 +60,7 @@ const ExploreTopBar: React.FC<ExploreTopBarProps> = ({
   onCommitQuery,
   onOpenFilters,
   onClearFilters,
+  onOpenMatches,
   hasActiveFilters,
   activeFiltersCount,
   distanceKm,
@@ -68,6 +72,12 @@ const ExploreTopBar: React.FC<ExploreTopBarProps> = ({
 }) => {
   const theme = useTheme();
   const [localQuery, setLocalQuery] = useState(query);
+
+  // color de texto con buen contraste en dark/light
+  const locationColor = useMemo(
+    () => applyAlpha(theme.colors.onSurface as string, 0.92),
+    [theme.colors.onSurface],
+  );
 
   useEffect(() => {
     if (searchOpen) setLocalQuery(query);
@@ -91,16 +101,34 @@ const ExploreTopBar: React.FC<ExploreTopBarProps> = ({
       {!searchOpen ? (
         <>
           <View style={styles.titleRow}>
-            <Text variant="titleLarge" style={styles.appTitle}>
-              {title}
-            </Text>
+            {/* Logo en lugar del texto "Paw2me" */}
+            <Image
+              source={bannerImg}
+              style={styles.logo}
+              resizeMode="contain"
+              accessible
+              accessibilityLabel={title}
+            />
             <View style={styles.actionsRow}>
-              <IconButton
-                icon="filter-variant-remove"
-                onPress={onClearFilters}
-                disabled={!hasActiveFilters}
-                accessibilityLabel="Limpiar filtros"
-              />
+              {/* Matches a la IZQUIERDA */}
+              {onOpenMatches ? (
+                <IconButton
+                  icon="heart-outline"
+                  onPress={onOpenMatches}
+                  accessibilityLabel="Ver matches"
+                />
+              ) : null}
+
+              {/* Quitar filtros SOLO si hay filtros activos */}
+              {hasActiveFilters ? (
+                <IconButton
+                  icon="filter-variant-remove"
+                  onPress={onClearFilters}
+                  accessibilityLabel="Limpiar filtros"
+                />
+              ) : null}
+
+              {/* Abrir filtros + badge de conteo */}
               <View style={styles.iconWrap}>
                 <IconButton
                   icon="tune-variant"
@@ -113,6 +141,8 @@ const ExploreTopBar: React.FC<ExploreTopBarProps> = ({
                   </Badge>
                 ) : null}
               </View>
+
+              {/* Buscar */}
               <IconButton
                 icon="magnify"
                 onPress={onOpenSearch}
@@ -128,7 +158,7 @@ const ExploreTopBar: React.FC<ExploreTopBarProps> = ({
                 <ActivityIndicator size="small" />
                 <Text
                   variant="bodySmall"
-                  style={styles.locationText}
+                  style={[styles.locationText, { color: locationColor }]}
                   numberOfLines={1}
                 >
                   Obteniendo tu ubicación…
@@ -145,7 +175,7 @@ const ExploreTopBar: React.FC<ExploreTopBarProps> = ({
                 />
                 <Text
                   variant="bodySmall"
-                  style={styles.locationText}
+                  style={[styles.locationText, { color: locationColor }]}
                   numberOfLines={1}
                 >
                   Usando tu ubicación
@@ -164,7 +194,11 @@ const ExploreTopBar: React.FC<ExploreTopBarProps> = ({
                   variant="bodySmall"
                   style={[
                     styles.locationText,
-                    { color: location.error ? theme.colors.error : undefined },
+                    {
+                      color: location.error
+                        ? (theme.colors.error as string)
+                        : locationColor,
+                    },
                   ]}
                   numberOfLines={1}
                 >
@@ -179,7 +213,6 @@ const ExploreTopBar: React.FC<ExploreTopBarProps> = ({
             {typeof distanceKm === 'number' ? (
               <TouchableRipple
                 onPress={onOpenFilters}
-                // 👇 Solo pasamos onLongPress si existe y con la firma correcta
                 {...(onClearDistance
                   ? { onLongPress: () => onClearDistance() }
                   : {})}
@@ -230,6 +263,7 @@ const ExploreTopBar: React.FC<ExploreTopBarProps> = ({
                     ),
                   },
                 ]}
+                rippleColor={applyAlpha(theme.colors.secondary as string, 0.16)}
               >
                 <Text
                   style={[
@@ -258,6 +292,7 @@ const ExploreTopBar: React.FC<ExploreTopBarProps> = ({
                       ),
                     },
                   ]}
+                  rippleColor={applyAlpha(theme.colors.primary as string, 0.16)}
                 >
                   <Text
                     style={[
@@ -279,6 +314,7 @@ const ExploreTopBar: React.FC<ExploreTopBarProps> = ({
                         borderColor: applyAlpha('#888888', 0.28),
                       },
                     ]}
+                    rippleColor={applyAlpha('#888888', 0.18)}
                   >
                     <Text style={[styles.pillText, { color: '#666666' }]}>
                       Ajustes
@@ -328,7 +364,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   actionsRow: { flexDirection: 'row', alignItems: 'center' },
-  appTitle: { fontWeight: '800', letterSpacing: 0.3 },
+  logo: { height: 40, width: 140, marginLeft: 1 },
   search: { borderRadius: 14 },
 
   iconWrap: { position: 'relative', justifyContent: 'center' },
@@ -346,7 +382,7 @@ const styles = StyleSheet.create({
   },
   inlineIcon: { margin: 0, width: 28, height: 28 },
   locationText: {
-    opacity: 0.85,
+    opacity: 0.9,
     fontSize: 13,
     lineHeight: 18,
     marginRight: 2,

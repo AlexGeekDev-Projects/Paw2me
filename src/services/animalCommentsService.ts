@@ -3,21 +3,19 @@ import {
   collection as fsCollection,
   query as fsQuery,
   orderBy as fsOrderBy,
-  limit as fsLimit,
-  startAfter as fsStartAfter,
   getDocs as fsGetDocs,
   addDoc as fsAddDoc,
   updateDoc as fsUpdateDoc,
   deleteDoc as fsDeleteDoc,
   doc as fsDoc,
   onSnapshot as fsOnSnapshot,
+  getCountFromServer,
   type FirebaseFirestoreTypes,
 } from '@services/firebase';
-import { onQuerySnapshot as fsOnQuerySnapshot } from '@services/firebase';
 import type { CommentDoc, CommentsPage, NewComment } from '@models/comment';
 
 type CommentFS = Readonly<{
-  pawId: string;
+  pawId?: string;
   authorUid: string;
   content: string;
   createdAt:
@@ -34,12 +32,15 @@ type CommentFS = Readonly<{
   deleted?: boolean;
 }>;
 
+// Usa segmentos (API modular)
 const colRef = (
   pawId: string,
 ): FirebaseFirestoreTypes.CollectionReference<CommentFS> =>
   fsCollection(
     getFirestore(),
-    `paws/${pawId}/comments`,
+    'paws',
+    pawId,
+    'comments',
   ) as unknown as FirebaseFirestoreTypes.CollectionReference<CommentFS>;
 
 const isTs = (v: unknown): v is FirebaseFirestoreTypes.Timestamp =>
@@ -65,7 +66,7 @@ const toDoc = (
   const d = snap.data();
   return {
     id: snap.id,
-    postId: d.pawId, // campo del modelo (compat)
+    postId: snap.ref.parent.parent?.id ?? '',
     authorUid: d.authorUid,
     content: d.content,
     createdAt: toMillis(d.createdAt) ?? Date.now(),
@@ -75,10 +76,10 @@ const toDoc = (
   };
 };
 
-// Paginada
+// Bootstrap (ascendente y nos quedamos con los últimos L)
 export async function listAnimalComments(
   pawId: string,
-  opts?: Readonly<{ limit?: number; after?: unknown | null }>,
+  opts?: Readonly<{ limit?: number }>,
 ): Promise<CommentsPage> {
   const L = Math.max(1, Math.min(200, opts?.limit ?? 50));
   const ss = (await fsGetDocs(
@@ -89,40 +90,40 @@ export async function listAnimalComments(
     ss.docs as FirebaseFirestoreTypes.QueryDocumentSnapshot<CommentFS>[]
   )
     .map(toDoc)
-    .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)); // asc
-
-  const items = all.slice(-L); // últimos L en asc
-  return { items, nextCursor: null };
+    .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+  return { items: all.slice(-L), nextCursor: null };
 }
 
-// RT (cabeza)
-// ─── RT (todos los comentarios en orden ascendente) ───
+// Realtime: todos ascendente
 export function listenAnimalCommentsHead(
   pawId: string,
-  opts: Readonly<{ onChange: (items: CommentDoc[]) => void; limit?: number }>,
+  opts: Readonly<{ onChange: (items: CommentDoc[]) => void }>,
 ): () => void {
-  // Importante: sin limit y en ascendente para traer todos los existentes
   const q = fsQuery(
     colRef(pawId),
     fsOrderBy('createdAt', 'asc'),
   ) as FirebaseFirestoreTypes.Query<CommentFS>;
 
-  return fsOnQuerySnapshot<CommentFS>(
+  const off = fsOnSnapshot(
     q,
     ss => {
       const docs =
         ss.docs as FirebaseFirestoreTypes.QueryDocumentSnapshot<CommentFS>[];
-      const items = docs.map(toDoc); // ya vienen ascendente, no invertir
+      const items = docs.map(toDoc);
+      if (__DEV__) console.log('[comments RT]', pawId, 'n=', items.length);
       opts.onChange(items);
     },
     err => {
-      console.warn('[listenAnimalCommentsHead] onSnapshot error:', err);
+      if (__DEV__) {
+        console.warn('[listenAnimalCommentsHead] onSnapshot error:', err);
+      }
       opts.onChange([]);
     },
   );
+  return off;
 }
 
-// Crear
+// Crear / Editar / Borrar
 export async function addAnimalComment(
   pawId: string,
   uid: string,
@@ -138,8 +139,6 @@ export async function addAnimalComment(
     updatedAt: null,
     deleted: false,
   } as CommentFS);
-
-  // No releemos: devolvemos optimista
   return {
     id: ref.id,
     postId: pawId,
@@ -152,7 +151,6 @@ export async function addAnimalComment(
   };
 }
 
-// Editar
 export async function editAnimalComment(
   pawId: string,
   commentId: string,
@@ -160,7 +158,10 @@ export async function editAnimalComment(
 ): Promise<void> {
   const ref = fsDoc(
     getFirestore(),
-    `paws/${pawId}/comments/${commentId}`,
+    'paws',
+    pawId,
+    'comments',
+    commentId,
   ) as FirebaseFirestoreTypes.DocumentReference<CommentFS>;
   await fsUpdateDoc<CommentFS>(ref, {
     content: content.trim(),
@@ -168,54 +169,34 @@ export async function editAnimalComment(
   });
 }
 
-// Borrar
 export async function deleteAnimalComment(
   pawId: string,
   commentId: string,
 ): Promise<void> {
   const ref = fsDoc(
     getFirestore(),
-    `paws/${pawId}/comments/${commentId}`,
+    'paws',
+    pawId,
+    'comments',
+    commentId,
   ) as FirebaseFirestoreTypes.DocumentReference<CommentFS>;
   await fsDeleteDoc(ref);
 }
 
-// ─── Conteo RT de comentarios (ojo: lee toda la colección) ───
-export function listenAnimalCommentsCount(
-  pawId: string,
-  onChange: (n: number) => void,
-): () => void {
-  const q = fsQuery(
-    colRef(pawId),
-    fsOrderBy('createdAt', 'desc'),
-  ) as FirebaseFirestoreTypes.Query<CommentFS>;
-  return fsOnQuerySnapshot<CommentFS>(
-    q,
-    ss => onChange(ss?.size ?? 0),
-    _e => onChange(0),
-  );
-}
-
-export function listenAnimalCommentsAll(
-  pawId: string,
-  onChange: (items: CommentDoc[]) => void,
-  onError?: (e: unknown) => void,
-): () => void {
-  const q = colRef(pawId) as unknown as FirebaseFirestoreTypes.Query<CommentFS>;
-  return fsOnSnapshot(
-    q as any,
-    (ss: FirebaseFirestoreTypes.QuerySnapshot<CommentFS>) => {
-      const docs = (ss?.docs ??
-        []) as FirebaseFirestoreTypes.QueryDocumentSnapshot<CommentFS>[];
-      const items = docs
-        .map(toDoc)
-        .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)); // asc
-      onChange(items);
-    },
-    err => {
-      console.warn('[listenAnimalCommentsAll] snapshot error:', err);
-      onError?.(err);
-      onChange([]);
-    },
-  );
+/** Conteo para Explore (aggregate) */
+export async function getCommentsCount(pawId: string): Promise<number> {
+  try {
+    const q = fsQuery(colRef(pawId)) as FirebaseFirestoreTypes.Query<CommentFS>;
+    const agg = await getCountFromServer(q as any);
+    const n =
+      typeof (agg as any)?.data === 'function'
+        ? (agg as any).data()?.count
+        : (agg as any)?.count;
+    return typeof n === 'number' ? n : 0;
+  } catch {
+    const ss = (await fsGetDocs(
+      colRef(pawId),
+    )) as FirebaseFirestoreTypes.QuerySnapshot<CommentFS>;
+    return ss.size ?? 0;
+  }
 }

@@ -2,29 +2,42 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { CommentDoc } from '@models/comment';
 import {
-  listenAnimalCommentsAll,
   listAnimalComments,
+  listenAnimalCommentsHead,
   addAnimalComment,
   editAnimalComment,
   deleteAnimalComment,
 } from '@services/animalCommentsService';
 
-type Options = Readonly<{ limit?: number; onFirstLoad?: () => void }>;
+type Options = Readonly<{
+  limit?: number;
+  onFirstLoad?: () => void;
+  enabled?: boolean;
+}>;
 
 export function useAnimalComments(
   animalId: string,
   userId: string | null,
   opts?: Options,
 ) {
+  const enabled = opts?.enabled !== false;
   const [items, setItems] = useState<CommentDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const firstSnap = useRef(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Bootstrap (sin orderBy)
+  // Mantén onFirstLoad estable
+  const onFirstLoadRef = useRef<Options['onFirstLoad']>(opts?.onFirstLoad);
   useEffect(() => {
+    onFirstLoadRef.current = opts?.onFirstLoad;
+  }, [opts?.onFirstLoad]);
+
+  // Bootstrap (últimos N en asc)
+  useEffect(() => {
+    if (!enabled) return;
     let alive = true;
     setLoading(true);
+    setError(null);
     (async () => {
       try {
         const page = await listAnimalComments(animalId, {
@@ -32,6 +45,9 @@ export function useAnimalComments(
         });
         if (!alive) return;
         setItems(page.items);
+      } catch (e) {
+        if (__DEV__) console.warn('[useAnimalComments] bootstrap', e);
+        if (alive) setError('No fue posible cargar comentarios.');
       } finally {
         if (alive) setLoading(false);
       }
@@ -39,34 +55,28 @@ export function useAnimalComments(
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [animalId]);
+  }, [animalId, opts?.limit, enabled]);
 
-  // RT: toda la colección, orden asc en cliente
+  // Realtime (asc). No dependas del objeto opts completo.
   useEffect(() => {
-    const off = listenAnimalCommentsAll(
-      animalId,
-      arr => {
+    if (!enabled) return;
+    const off = listenAnimalCommentsHead(animalId, {
+      onChange: arr => {
         setItems(arr);
-        if (!firstSnap.current) {
-          firstSnap.current = true;
-          setLoading(false);
-          opts?.onFirstLoad?.();
-        }
+        setLoading(false);
+        onFirstLoadRef.current?.();
+        onFirstLoadRef.current = undefined;
       },
-      () => setLoading(false),
-    );
+    });
     return off;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [animalId]);
+  }, [animalId, enabled]);
 
   const add = useCallback(
     async (content: string) => {
       if (!userId) throw new Error('Debe iniciar sesión para comentar.');
       const text = content.trim();
       if (!text) return;
-
-      // Optimista
+      // optimista
       const temp: CommentDoc = {
         id: `__opt_${Date.now()}`,
         postId: animalId,
@@ -78,7 +88,6 @@ export function useAnimalComments(
         deleted: false,
       };
       setItems(prev => prev.concat(temp));
-
       setSending(true);
       try {
         await addAnimalComment(animalId, userId, { content: text });
@@ -90,15 +99,14 @@ export function useAnimalComments(
   );
 
   const edit = useCallback(
-    async (commentId: string, content: string) =>
+    (commentId: string, content: string) =>
       editAnimalComment(animalId, commentId, content),
     [animalId],
   );
-
   const remove = useCallback(
-    async (commentId: string) => deleteAnimalComment(animalId, commentId),
+    (commentId: string) => deleteAnimalComment(animalId, commentId),
     [animalId],
   );
 
-  return { items, loading, sending, add, edit, remove };
+  return { items, loading, sending, error, add, edit, remove };
 }

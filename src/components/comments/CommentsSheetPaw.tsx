@@ -18,25 +18,24 @@ import {
 } from 'react-native-paper';
 import type { ListRenderItem } from 'react-native';
 
-import { useComments } from '@hooks/comments/useComments';
 import type { CommentDoc } from '@models/comment';
+import { useAnimalComments } from '@hooks/useAnimalComments';
 import { getApp, getAuth } from '@services/firebase';
-import { emitPostCommentAdded } from '@utils/commentsEvents';
+import { emitAnimalCommentAdded } from '@utils/commentsEvents';
 
 import CommentItem from './CommentItem';
 import CommentComposer from './CommentComposer';
 
 type Props = Readonly<{
   visible: boolean;
-  postId: string;
+  pawId: string;
   onDismiss: () => void;
 }>;
 
-const CommentsSheet: React.FC<Props> = ({ visible, postId, onDismiss }) => {
+const CommentsSheetPaw: React.FC<Props> = ({ visible, pawId, onDismiss }) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
 
-  // Evita warning deprecado: usa getApp() y luego getAuth(app)
   const app = getApp();
   const auth = getAuth(app);
   const uid = auth.currentUser?.uid ?? null;
@@ -45,14 +44,15 @@ const CommentsSheet: React.FC<Props> = ({ visible, postId, onDismiss }) => {
   const listRef = useRef<FlatList<CommentDoc>>(null);
   const inputRef = useRef<RNTextInput>(null);
 
-  // Bootstrap + RT (solo cuando es visible)
-  const { comments, loading, error, add, edit, remove } = useComments(
-    postId,
-    uid,
-    visible && !!postId,
-  );
+  const {
+    items: comments,
+    loading,
+    error,
+    add,
+    edit,
+    remove,
+  } = useAnimalComments(pawId, uid, { enabled: visible && !!pawId });
 
-  /* ──────────── Auto-scroll al final ──────────── */
   const scrollToBottom = useCallback(() => {
     const anyList = listRef.current as unknown as {
       scrollToEnd?: (o: { animated: boolean }) => void;
@@ -92,29 +92,21 @@ const CommentsSheet: React.FC<Props> = ({ visible, postId, onDismiss }) => {
     return () => sub.remove();
   }, [visible, scrollToBottom]);
 
-  /* ──────────── Enviar (MISMO patrón que Explorer) ────────────
-     - Solo emitimos el evento optimista al enviar (+1).
-     - Si falla la escritura, revertimos con (-1).
-     - NUNCA emitimos al abrir/cerrar ni por snapshots RT.
-  */
   const send = useCallback(
     async (text: string) => {
-      const value = text.trim();
+      const value = (text ?? '').trim();
       if (!value || !uid) return;
 
-      // Optimista en Feed (como Explorer)
-      emitPostCommentAdded({ postId, delta: 1 });
-
+      emitAnimalCommentAdded({ pawId, delta: 1 });
       try {
-        await add({ content: value });
+        await add(value); // useAnimalComments: string
         requestAnimationFrame(scrollToBottom);
       } catch (e) {
-        // Revertir si falla
-        emitPostCommentAdded({ postId, delta: -1 });
-        if (__DEV__) console.warn('[CommentsSheet] add error', e);
+        emitAnimalCommentAdded({ pawId, delta: -1 });
+        if (__DEV__) console.warn('[CommentsSheetPaw] add error', e);
       }
     },
-    [uid, postId, add, scrollToBottom],
+    [uid, pawId, add, scrollToBottom],
   );
 
   const renderItem: ListRenderItem<CommentDoc> = useCallback(
@@ -122,8 +114,8 @@ const CommentsSheet: React.FC<Props> = ({ visible, postId, onDismiss }) => {
       <CommentItem
         data={item}
         canEdit={uid === item.authorUid}
-        onEdit={c => void edit(c.id, c.content)}
-        onDelete={c => void remove(c.id)}
+        {...(edit ? { onEdit: c => void edit(c.id, c.content) } : {})}
+        {...(remove ? { onDelete: c => void remove(c.id) } : {})}
       />
     ),
     [uid, edit, remove],
@@ -137,10 +129,7 @@ const CommentsSheet: React.FC<Props> = ({ visible, postId, onDismiss }) => {
       transparent
       onRequestClose={onDismiss}
     >
-      {/* Backdrop */}
       <View style={styles.backdrop} />
-
-      {/* Sheet */}
       <KeyboardAvoidingView
         behavior={Platform.select({ ios: 'padding', android: undefined })}
         style={styles.sheetWrap}
@@ -154,7 +143,6 @@ const CommentsSheet: React.FC<Props> = ({ visible, postId, onDismiss }) => {
             },
           ]}
         >
-          {/* Handle + Header */}
           <View style={styles.handle} />
           <View style={styles.header}>
             <Text variant="titleMedium" style={styles.title}>
@@ -167,7 +155,6 @@ const CommentsSheet: React.FC<Props> = ({ visible, postId, onDismiss }) => {
             />
           </View>
 
-          {/* Content */}
           {loading ? (
             <View style={styles.center}>
               <ActivityIndicator />
@@ -194,7 +181,8 @@ const CommentsSheet: React.FC<Props> = ({ visible, postId, onDismiss }) => {
               keyExtractor={c => c.id}
               renderItem={renderItem}
               contentContainerStyle={styles.listContent}
-              keyboardShouldPersistTaps="handled"
+              keyboardShouldPersistTaps="always" // 👈 iOS: evita el 2-tap
+              keyboardDismissMode="none" // 👈 iOS: no cerrar teclado
               ItemSeparatorComponent={() => <View style={{ height: 2 }} />}
               showsVerticalScrollIndicator={false}
               onContentSizeChange={onSizeChange}
@@ -205,12 +193,12 @@ const CommentsSheet: React.FC<Props> = ({ visible, postId, onDismiss }) => {
             />
           )}
 
-          {/* Composer */}
           <View style={styles.composerWrap}>
             <CommentComposer
+              ref={inputRef}
               disabled={!uid}
               onSubmit={send}
-              avatarURL={mePhoto}
+              avatarURL={mePhoto ?? null}
             />
           </View>
         </View>
@@ -271,4 +259,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default CommentsSheet;
+export default CommentsSheetPaw;

@@ -1,25 +1,32 @@
 // src/screens/FeedScreen.tsx
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  startTransition,
+} from 'react';
 import {
-  Image,
   Animated,
   FlatList as RNFlatList,
+  Image,
   RefreshControl,
   StyleSheet,
   View,
+  type ListRenderItem,
   type ViewToken,
 } from 'react-native';
-import type { ListRenderItem } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActivityIndicator, Button, Text, useTheme } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 
-import Loading from '@components/feedback/Loading';
 import Screen from '@components/layout/Screen';
+import Loading from '@components/feedback/Loading';
 import PostCard from '@components/feed/PostCard';
 import FeedHeaderBanner from '@components/feed/FeedHeaderBanner';
 import FeedComposerBar from '@components/feed/FeedComposerBar';
-
 import CommentsSheet from '@components/comments/CommentsSheet';
 
 import { listPostsPublic, toPostVM } from '@services/postsService';
@@ -28,18 +35,24 @@ import {
   getUserReacted as getUserPostReacted,
   getReactionCounts as getPostReactionCounts,
   setMyReactionKey as setMyPostReactionKey,
+  type PostReactionKey,
 } from '@services/postReactionsService';
 
+import {
+  getAuth,
+  getFirestore,
+  doc,
+  getDoc,
+  type FirebaseFirestoreTypes,
+} from '@services/firebase';
 import type { PostDoc, PostCardVM } from '@models/post';
-import { getAuth, getFirestore, doc, getDoc } from '@services/firebase';
-import type { FirebaseFirestoreTypes } from '@services/firebase';
-
 import type { ReactionCounts, ReactionKey } from '@reactions/types';
-import type { PostReactionKey } from '@services/postReactionsService';
+import { onPostCommentAdded } from '@utils/commentsEvents';
 
 type UIReactionKey = ReactionKey;
 
 /* ───────────────────────────────────────────────────────────── */
+
 const PAGE_SIZE = 20;
 const LOAD_MORE_COOLDOWN_MS = 900;
 
@@ -49,18 +62,17 @@ const STAGGER_DURATION_MS = 220;
 
 const emptyInbox = require('@assets/empty-paw.png') as number;
 
-/* Normalizador (v1/v2) */
+/** Soporte a respuestas antiguas y nuevas del servicio */
 type PostsPage =
   | PostDoc[]
   | Readonly<{ items: PostDoc[]; nextCursor?: string | null }>;
 
-function normalizePostsPage(res: PostsPage): {
-  items: PostDoc[];
-  nextCursor: string | null;
-} {
+const normalizePostsPage = (
+  res: PostsPage,
+): { items: PostDoc[]; nextCursor: string | null } => {
   if (Array.isArray(res)) return { items: res, nextCursor: null };
   return { items: res.items, nextCursor: res.nextCursor ?? null };
-}
+};
 
 /* Autor light */
 type UserLight = Readonly<{
@@ -84,7 +96,8 @@ const displayFromUser = (u: UserLight | undefined | null): string => {
   return 'Usuario';
 };
 
-/* Item animado tipado para PostCard (UIReactionKey) */
+/* ───────────────── Item animado (envuelve PostCard) ───────────────── */
+
 const AnimatedPostItem: React.FC<{
   item: PostCardVM;
   index: number;
@@ -98,70 +111,79 @@ const AnimatedPostItem: React.FC<{
   ) => void | Promise<void>;
   isVisible: boolean;
   onCommentPress: (postId: string) => void;
-}> = ({
-  item,
-  index,
-  author,
-  onToggleReact,
-  currentReaction,
-  counts,
-  onReactKey,
-  isVisible,
-  onCommentPress,
-}) => {
-  const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(8)).current;
+}> = memo(
+  ({
+    item,
+    index,
+    author,
+    onToggleReact,
+    currentReaction,
+    counts,
+    onReactKey,
+    isVisible,
+    onCommentPress,
+  }) => {
+    const opacity = useRef(new Animated.Value(0)).current;
+    const translateY = useRef(new Animated.Value(8)).current;
 
-  useEffect(() => {
-    const delay = Math.min(index, STAGGER_MAX_ITEMS) * STAGGER_STEP_MS;
-    Animated.parallel([
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: STAGGER_DURATION_MS,
-        delay,
-        useNativeDriver: true,
-      }),
-      Animated.timing(translateY, {
-        toValue: 0,
-        duration: STAGGER_DURATION_MS,
-        delay,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [index, item.id, opacity, translateY]);
+    useEffect(() => {
+      const delay = Math.min(index, STAGGER_MAX_ITEMS) * STAGGER_STEP_MS;
+      Animated.parallel([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: STAGGER_DURATION_MS,
+          delay,
+          useNativeDriver: true,
+        }),
+        Animated.timing(translateY, {
+          toValue: 0,
+          duration: STAGGER_DURATION_MS,
+          delay,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }, [index, item.id, opacity, translateY]);
 
-  return (
-    <Animated.View style={{ opacity, transform: [{ translateY }] }}>
-      <PostCard
-        data={item}
-        {...(author ? ({ author } as const) : {})}
-        onToggleReact={onToggleReact}
-        currentReaction={currentReaction}
-        {...(counts ? ({ counts } as const) : {})}
-        onReactKey={onReactKey}
-        availableKeys={['like', 'love', 'happy', 'sad', 'wow', 'angry']}
-        isVisible={isVisible}
-        onCommentPress={onCommentPress}
-      />
-    </Animated.View>
-  );
-};
+    return (
+      <Animated.View style={{ opacity, transform: [{ translateY }] }}>
+        <PostCard
+          data={item}
+          {...(author ? ({ author } as const) : {})}
+          onToggleReact={onToggleReact}
+          currentReaction={currentReaction}
+          {...(counts ? ({ counts } as const) : {})}
+          onReactKey={onReactKey}
+          availableKeys={['like', 'love', 'happy', 'sad', 'wow', 'angry']}
+          isVisible={isVisible}
+          onCommentPress={onCommentPress}
+        />
+      </Animated.View>
+    );
+  },
+  (a, b) =>
+    a.item.id === b.item.id &&
+    a.currentReaction === b.currentReaction &&
+    a.isVisible === b.isVisible &&
+    a.onReactKey === b.onReactKey &&
+    a.onToggleReact === b.onToggleReact &&
+    a.onCommentPress === b.onCommentPress &&
+    (a.author?.name ?? '') === (b.author?.name ?? '') &&
+    (a.author?.photoURL ?? '') === (b.author?.photoURL ?? '') &&
+    JSON.stringify(a.counts ?? {}) === JSON.stringify(b.counts ?? {}),
+);
 
-/* Pantalla */
+/* ─────────────────────────── Pantalla ─────────────────────────── */
+
 const FeedScreen: React.FC = () => {
   const theme = useTheme();
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
-  const loveCooloffRef = useRef<Record<string, number>>({});
-  const loveBlockUntilRef = useRef<Record<string, number>>({});
-  const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null);
 
   const auth = getAuth();
   const uid = auth.currentUser?.uid ?? null;
 
-  // Animated scroll para efectos del header
+  // Animación de scroll (banner + composer)
   const scrollY = useRef(new Animated.Value(0)).current;
-
   const bannerScale = scrollY.interpolate({
     inputRange: [-120, 0],
     outputRange: [1.1, 1],
@@ -183,6 +205,7 @@ const FeedScreen: React.FC = () => {
     extrapolate: 'clamp',
   });
 
+  // Estado principal
   const [cards, setCards] = useState<PostCardVM[]>([]);
   const [authorByPostId, setAuthorByPostId] = useState<
     Record<string, Readonly<{ name: string; photoURL?: string }>>
@@ -191,7 +214,7 @@ const FeedScreen: React.FC = () => {
     {},
   );
 
-  // Reacciones (estado por post)
+  // Reacciones
   const [currentByPostId, setCurrentByPostId] = useState<
     Record<string, PostReactionKey | null>
   >({});
@@ -199,9 +222,10 @@ const FeedScreen: React.FC = () => {
     Record<string, ReactionCounts>
   >({});
 
-  // Visibilidad por post (autopreview)
+  // Mapa de visibilidad (auto-preview video)
   const [visibleMap, setVisibleMap] = useState<Record<string, true>>({});
 
+  // Control de carga y paginación
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
@@ -211,12 +235,36 @@ const FeedScreen: React.FC = () => {
   const listRef = useRef<RNFlatList<PostCardVM>>(null);
   const lastLoadMoreAtRef = useRef(0);
   const endReachedDuringMomentum = useRef(false);
+  const loveCooloffRef = useRef<Record<string, number>>({});
+
+  const openCommentsForRef = useRef<string | null>(null);
+  const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null);
 
   const openComments = useCallback((postId: string) => {
+    openCommentsForRef.current = postId;
     setOpenCommentsFor(postId);
   }, []);
 
-  // cargar mi usuario (para composer)
+  /* ── Comentarios: delta local (optimista) ── */
+  useEffect(() => {
+    const off = onPostCommentAdded(({ postId, delta = 1 }) => {
+      startTransition(() => {
+        setCards(prev =>
+          prev.map(p =>
+            p.id === postId
+              ? {
+                  ...p,
+                  commentCount: Math.max(0, (p.commentCount ?? 0) + delta),
+                }
+              : p,
+          ),
+        );
+      });
+    });
+    return off;
+  }, []);
+
+  /* ── Datos del usuario (Composer) ── */
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -237,7 +285,7 @@ const FeedScreen: React.FC = () => {
     };
   }, [uid]);
 
-  // Cache por uid
+  /* ── Resolución de autores cacheada ── */
   const userCacheRef = useRef<Map<string, UserLight>>(new Map());
   const resolveAuthorsFor = useCallback(async (posts: PostDoc[]) => {
     const uids = Array.from(
@@ -273,6 +321,7 @@ const FeedScreen: React.FC = () => {
     setAuthorByPostId(prev => ({ ...prev, ...map }));
   }, []);
 
+  /* Prefetch de primeras imágenes (percepción de velocidad) */
   const prefetchFirstImages = useCallback((vms: PostCardVM[]) => {
     const urls = vms
       .map(vm => (Array.isArray(vm.imageUrls) ? vm.imageUrls[0] : undefined))
@@ -288,44 +337,52 @@ const FeedScreen: React.FC = () => {
     (c?.wow ?? 0) +
     (c?.angry ?? 0);
 
-  /* Primera página */
+  /* ───────── Primera página ───────── */
   const fetchFirstPage = useCallback(async () => {
     setLoading(true);
     try {
       const raw = (await listPostsPublic({ limit: PAGE_SIZE })) as PostsPage;
       const { items, nextCursor } = normalizePostsPage(raw);
 
-      const vms: PostCardVM[] = await Promise.all(
+      const triples = await Promise.all(
         items.map(async (p: PostDoc) => {
           const [myKey, counts, cmtCount] = await Promise.all([
             uid ? getUserPostReacted(p.id, uid) : Promise.resolve(null),
             getPostReactionCounts(p.id),
-            getCommentsCount(p.id), // ✅ NUEVO
+            getCommentsCount(p.id),
           ]);
-
           const rcTotal = sumCounts(counts);
           const vm = toPostVM(
-            { ...p, reactionCount: rcTotal, commentCount: cmtCount }, // ✅ INYECTA
+            { ...p, reactionCount: rcTotal, commentCount: cmtCount },
             myKey === 'love',
           );
-
-          setCurrentByPostId(prev => ({ ...prev, [p.id]: myKey }));
-          setCountsByPostId(prev => ({ ...prev, [p.id]: counts }));
-          return vm;
+          return { id: p.id, vm, myKey, counts };
         }),
       );
 
+      const vms: PostCardVM[] = triples.map(t => t.vm);
+      const nextCurrent: Record<string, PostReactionKey | null> = {};
+      const nextCounts: Record<string, ReactionCounts> = {};
+      for (const t of triples) {
+        nextCurrent[t.id] = t.myKey;
+        nextCounts[t.id] = t.counts;
+      }
+
       await resolveAuthorsFor(items);
       prefetchFirstImages(vms);
+
+      // Estados agrupados (menos renders)
+      setCurrentByPostId(prev => ({ ...prev, ...nextCurrent }));
+      setCountsByPostId(prev => ({ ...prev, ...nextCounts }));
       setCards(vms);
       setCursor(nextCursor);
       setHasMore(Boolean(nextCursor));
     } finally {
       setLoading(false);
     }
-  }, [uid, prefetchFirstImages, resolveAuthorsFor]);
+  }, [uid, resolveAuthorsFor, prefetchFirstImages]);
 
-  /* Paginación */
+  /* ───────── Paginación ───────── */
   const fetchNextPage = useCallback(async () => {
     const now = Date.now();
     if (!hasMore || loadingMore) return;
@@ -341,28 +398,35 @@ const FeedScreen: React.FC = () => {
 
       const { items, nextCursor } = normalizePostsPage(raw);
 
-      const vms: PostCardVM[] = await Promise.all(
+      const triples = await Promise.all(
         items.map(async (p: PostDoc) => {
           const [myKey, counts, cmtCount] = await Promise.all([
             uid ? getUserPostReacted(p.id, uid) : Promise.resolve(null),
             getPostReactionCounts(p.id),
-            getCommentsCount(p.id), // ✅ NUEVO
+            getCommentsCount(p.id),
           ]);
-
           const rcTotal = sumCounts(counts);
           const vm = toPostVM(
-            { ...p, reactionCount: rcTotal, commentCount: cmtCount }, // ✅ INYECTA
+            { ...p, reactionCount: rcTotal, commentCount: cmtCount },
             myKey === 'love',
           );
-
-          setCurrentByPostId(prev => ({ ...prev, [p.id]: myKey }));
-          setCountsByPostId(prev => ({ ...prev, [p.id]: counts }));
-          return vm;
+          return { id: p.id, vm, myKey, counts };
         }),
       );
 
+      const vms: PostCardVM[] = triples.map(t => t.vm);
+      const nextCurrent: Record<string, PostReactionKey | null> = {};
+      const nextCounts: Record<string, ReactionCounts> = {};
+      for (const t of triples) {
+        nextCurrent[t.id] = t.myKey;
+        nextCounts[t.id] = t.counts;
+      }
+
       await resolveAuthorsFor(items);
       prefetchFirstImages(vms);
+
+      setCurrentByPostId(prev => ({ ...prev, ...nextCurrent }));
+      setCountsByPostId(prev => ({ ...prev, ...nextCounts }));
       setCards(prev => prev.concat(vms));
       setCursor(nextCursor);
       setHasMore(Boolean(nextCursor));
@@ -374,8 +438,8 @@ const FeedScreen: React.FC = () => {
     hasMore,
     loadingMore,
     uid,
-    prefetchFirstImages,
     resolveAuthorsFor,
+    prefetchFirstImages,
   ]);
 
   const handleEndReached = useCallback(() => {
@@ -397,27 +461,22 @@ const FeedScreen: React.FC = () => {
     void fetchFirstPage();
   }, [fetchFirstPage]);
 
-  // alias claro para usar dentro del handler
+  // Alias claro
   const setMyReactionKey = setMyPostReactionKey;
 
-  /* ---------- Reacciones: handler exacto (PostReactionKey) ---------- */
+  /* ───────── Reacciones (exacto) ───────── */
   const handleReactKeyExact = useCallback(
     async (
       postId: string,
       incomingNext: PostReactionKey | null,
     ): Promise<void> => {
       if (!uid) return;
+      const prevKey: PostReactionKey | null = currentByPostId[postId] ?? null;
 
-      const prevKey: PostReactionKey | null = currentByPostId?.[postId] ?? null;
+      // No-op
+      if (prevKey === incomingNext) return;
 
-      // No-op: si no cambia nada, salimos
-      if (prevKey === incomingNext) {
-        if (__DEV__) console.log('[Reactions] FEED no-op', { postId, prevKey });
-        return;
-      }
-
-      // ── Bloqueo anti “love” fantasma:
-      // cuando se quita cualquier reacción, bloqueamos "love" por ~650ms.
+      // Anti "love" fantasma por cooldown de quit→love inmediato
       const now = Date.now();
       if (incomingNext === null) {
         loveCooloffRef.current[postId] = now + 650;
@@ -425,28 +484,13 @@ const FeedScreen: React.FC = () => {
         incomingNext === 'love' &&
         now < (loveCooloffRef.current[postId] ?? 0)
       ) {
-        if (__DEV__) {
-          console.log('[Reactions] FEED swallow love (cooldown active)', {
-            postId,
-            prevKey,
-          });
-        }
-        return; // ignoramos este love “rebote”
+        return;
       }
 
       const nextKey: PostReactionKey | null = incomingNext;
-      const delta = (nextKey ? 1 : 0) - (prevKey ? 1 : 0); // +1/0/-1
+      const delta = (nextKey ? 1 : 0) - (prevKey ? 1 : 0);
 
-      if (__DEV__) {
-        console.log('[Reactions] FEED START', {
-          postId,
-          prevKey,
-          nextKey,
-          delta,
-        });
-      }
-
-      // ── OPTIMISTA: PostCard
+      // Optimista
       setCards(prev =>
         prev.map(it =>
           it.id === postId
@@ -458,11 +502,7 @@ const FeedScreen: React.FC = () => {
             : it,
         ),
       );
-
-      // ── OPTIMISTA: clave actual
       setCurrentByPostId(prev => ({ ...prev, [postId]: nextKey }));
-
-      // ── OPTIMISTA: contadores por clave
       setCountsByPostId(prev => {
         const base: ReactionCounts = prev[postId] ?? {
           like: 0,
@@ -475,67 +515,48 @@ const FeedScreen: React.FC = () => {
         const next = { ...base };
         if (prevKey) next[prevKey] = Math.max(0, (next[prevKey] ?? 0) - 1);
         if (nextKey) next[nextKey] = (next[nextKey] ?? 0) + 1;
-
-        if (__DEV__) {
-          console.log('[Reactions][svc] TX write', {
-            postId,
-            userId: uid,
-            prev: String(prevKey),
-            next: String(nextKey),
-            ...next,
-          });
-        }
-
         return { ...prev, [postId]: next };
       });
 
-      // ── PERSISTENCIA
-      if (__DEV__)
-        console.log('[Reactions][svc] TX begin', { postId, next: nextKey });
+      // Persistencia
       try {
         await setMyReactionKey(postId, nextKey);
       } finally {
-        if (__DEV__)
-          console.log('[Reactions][svc] TX end', { postId, next: nextKey });
-      }
+        // Reconciliar con servidor sin bloquear UI
+        startTransition(async () => {
+          const [finalKey, finalCounts] = await Promise.all([
+            uid ? getUserPostReacted(postId, uid) : Promise.resolve(null),
+            getPostReactionCounts(postId),
+          ]);
+          setCurrentByPostId(prev => ({ ...prev, [postId]: finalKey }));
+          setCountsByPostId(prev => ({ ...prev, [postId]: finalCounts }));
 
-      // ── RECONCILIACIÓN (estado real en servidor)
-      const [finalKey, finalCounts] = await Promise.all([
-        uid ? getUserPostReacted(postId, uid) : Promise.resolve(null),
-        getPostReactionCounts(postId),
-      ]);
+          const total =
+            (finalCounts.like ?? 0) +
+            (finalCounts.love ?? 0) +
+            (finalCounts.happy ?? 0) +
+            (finalCounts.sad ?? 0) +
+            (finalCounts.wow ?? 0) +
+            (finalCounts.angry ?? 0);
 
-      setCurrentByPostId(prev => ({ ...prev, [postId]: finalKey }));
-      setCountsByPostId(prev => ({ ...prev, [postId]: finalCounts }));
-
-      const total =
-        (finalCounts.like ?? 0) +
-        (finalCounts.love ?? 0) +
-        (finalCounts.happy ?? 0) +
-        (finalCounts.sad ?? 0) +
-        (finalCounts.wow ?? 0) +
-        (finalCounts.angry ?? 0);
-
-      setCards(prev =>
-        prev.map(it =>
-          it.id === postId
-            ? { ...it, reactionCount: total, reactedByMe: finalKey === 'love' }
-            : it,
-        ),
-      );
-
-      if (__DEV__) {
-        console.log('[Reactions] FEED FINAL', {
-          postId,
-          finalKey: finalKey ?? null,
-          finalCounts,
+          setCards(prev =>
+            prev.map(it =>
+              it.id === postId
+                ? {
+                    ...it,
+                    reactionCount: total,
+                    reactedByMe: finalKey === 'love',
+                  }
+                : it,
+            ),
+          );
         });
       }
     },
     [uid, currentByPostId, setMyReactionKey],
   );
 
-  /* Adaptador UI (filtra "match") */
+  /* Adaptador UI → exacto (filtra 'match') */
   const handleReactKeyUI = useCallback(
     async (postId: string, key: UIReactionKey | null) => {
       const nextKey: PostReactionKey | null =
@@ -545,7 +566,7 @@ const FeedScreen: React.FC = () => {
     [handleReactKeyExact],
   );
 
-  /* Compat: toggle “love” */
+  /* Compat: toggle “love” (legacy) */
   const onToggleReact = useCallback(
     async (postId: string, next: boolean) => {
       if (!uid) return;
@@ -555,7 +576,7 @@ const FeedScreen: React.FC = () => {
     [uid, handleReactKeyExact],
   );
 
-  /* Convertir ReactionCounts → counts UI parciales */
+  /* Mapea ReactionCounts → UI parcial */
   const toUICounts = (
     c: ReactionCounts | undefined,
   ): Partial<Record<UIReactionKey, number>> => ({
@@ -567,22 +588,75 @@ const FeedScreen: React.FC = () => {
     angry: c?.angry ?? 0,
   });
 
-  /* Viewability para auto-preview de video */
+  /* ── Viewability con dif + raf (menos updates) ── */
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 85 }).current;
+  const lastVisibleIdsRef = useRef<Set<string>>(new Set());
+  const rafPendingRef = useRef<number | null>(null);
+
+  const applyVisibleMap = useCallback((ids: Set<string>) => {
+    setVisibleMap(prev => {
+      // evitar cambios si es igual
+      if (prev && Object.keys(prev).length === ids.size) {
+        let same = true;
+        for (const id of ids) {
+          if (!prev[id]) {
+            same = false;
+            break;
+          }
+        }
+        if (same) return prev;
+      }
+      const next: Record<string, true> = {};
+      ids.forEach(id => {
+        next[id] = true as const;
+      });
+      return next;
+    });
+  }, []);
+
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      const next: Record<string, true> = {};
+      const nextIds = new Set<string>();
       for (const v of viewableItems) {
         if (v.isViewable) {
           const it = v.item as PostCardVM;
-          next[it.id] = true;
+          nextIds.add(it.id);
         }
       }
-      setVisibleMap(next);
+      // diff rápido
+      const prevIds = lastVisibleIdsRef.current;
+      let changed = nextIds.size !== prevIds.size;
+      if (!changed) {
+        for (const id of nextIds) {
+          if (!prevIds.has(id)) {
+            changed = true;
+            break;
+          }
+        }
+      }
+      if (!changed) return;
+
+      lastVisibleIdsRef.current = nextIds;
+
+      // agrupar en frame (reduce dt)
+      if (rafPendingRef.current != null) {
+        cancelAnimationFrame(rafPendingRef.current);
+      }
+      rafPendingRef.current = requestAnimationFrame(() => {
+        applyVisibleMap(nextIds);
+        rafPendingRef.current = null;
+      });
     },
   ).current;
 
-  /* Render */
+  useEffect(() => {
+    return () => {
+      if (rafPendingRef.current != null)
+        cancelAnimationFrame(rafPendingRef.current);
+    };
+  }, []);
+
+  /* ── Render item memo ── */
   const renderItem: ListRenderItem<PostCardVM> = useCallback(
     ({ item, index }) => {
       const author = authorByPostId[item.id];
@@ -605,19 +679,23 @@ const FeedScreen: React.FC = () => {
       );
     },
     [
-      onToggleReact,
       authorByPostId,
       currentByPostId,
       countsByPostId,
-      handleReactKeyUI,
       visibleMap,
+      onToggleReact,
+      handleReactKeyUI,
       openComments,
     ],
   );
 
+  const keyExtractor = useCallback((it: PostCardVM) => it.id, []);
+
+  /* ───────── UI ───────── */
+
   return (
     <Screen edges={['bottom']}>
-      {/* Overlay bajo el notch visible solo al hacer pull */}
+      {/* Overlay bajo el notch (se desvanece al bajar) */}
       <Animated.View
         pointerEvents="none"
         style={{
@@ -668,7 +746,7 @@ const FeedScreen: React.FC = () => {
         <Animated.FlatList
           ref={listRef as any}
           data={cards}
-          keyExtractor={it => it.id}
+          keyExtractor={keyExtractor}
           renderItem={renderItem}
           ListHeaderComponent={
             <Animated.View
@@ -714,22 +792,27 @@ const FeedScreen: React.FC = () => {
             paddingHorizontal: 0,
             paddingBottom: 96,
           }}
+          // 🔧 Ajustes de rendimiento (menos trabajo por frame)
           removeClippedSubviews
-          maxToRenderPerBatch={8}
-          updateCellsBatchingPeriod={50}
-          initialNumToRender={10}
+          windowSize={7}
+          maxToRenderPerBatch={6}
+          updateCellsBatchingPeriod={80}
+          initialNumToRender={6}
+          // Animación de scroll
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
             { useNativeDriver: true },
           )}
           scrollEventThrottle={16}
+          // Visibilidad throttled (auto-preview video)
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
         />
       )}
+
       <CommentsSheet
         visible={openCommentsFor !== null}
-        postId={openCommentsFor ?? ''} // seguro
+        postId={openCommentsFor ?? ''}
         onDismiss={() => setOpenCommentsFor(null)}
       />
     </Screen>

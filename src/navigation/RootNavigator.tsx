@@ -2,6 +2,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
+import type { NavigatorScreenParams } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -29,9 +30,6 @@ import Matches from '@screens/User/Matches';
 /* ========= Tipos ========= */
 export type RootStackParamList = {
   AppTabs: undefined;
-  CreateAnimal: undefined; // flujo que abre el tab “+”
-  AnimalDetail: { id: string };
-
   Login: undefined;
   Register: undefined;
   ForgotPassword: undefined;
@@ -46,11 +44,12 @@ export type FeedStackParamList = {
 export type ExploreStackParamList = {
   Explore: undefined;
   AnimalDetail: { id: string };
+  Matches: undefined; // dentro de Explore para mantener tabs visibles
+  CreateAnimal: undefined; // Create con tabs visibles
 };
 
-export type MatchesStackParamList = {
-  Matches: undefined;
-  AnimalDetail: { id: string };
+export type ServicesStackParamList = {
+  Services: undefined;
 };
 
 export type SettingsStackParamList = {
@@ -58,21 +57,22 @@ export type SettingsStackParamList = {
 };
 
 export type TabParamList = {
-  FeedTab: undefined;
-  ExploreTab: undefined;
+  FeedTab: NavigatorScreenParams<FeedStackParamList> | undefined;
+  ExploreTab: NavigatorScreenParams<ExploreStackParamList> | undefined;
   Create: undefined; // tab “placebo” para el +
-  MatchesTab: undefined;
-  SettingsTab: undefined;
+  ServicesTab: NavigatorScreenParams<ServicesStackParamList> | undefined;
+  SettingsTab: NavigatorScreenParams<SettingsStackParamList> | undefined;
 };
 
+/* ========= Stacks ========= */
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 const FeedStack = createNativeStackNavigator<FeedStackParamList>();
 const ExploreStack = createNativeStackNavigator<ExploreStackParamList>();
-const MatchesStack = createNativeStackNavigator<MatchesStackParamList>();
+const ServicesStack = createNativeStackNavigator<ServicesStackParamList>();
 const SettingsStack = createNativeStackNavigator<SettingsStackParamList>();
 const Tabs = createBottomTabNavigator<TabParamList>();
 
-/* ======== Stacks por pestaña ======== */
+/* ======== Feed (tabs) ======== */
 const FeedStackNavigator: React.FC = () => (
   <FeedStack.Navigator screenOptions={{ headerShown: false }}>
     <FeedStack.Screen name="Feed" component={FeedScreen} />
@@ -85,27 +85,45 @@ const FeedStackNavigator: React.FC = () => (
   </FeedStack.Navigator>
 );
 
-const ExploreStackNavigator: React.FC = () => (
-  <ExploreStack.Navigator screenOptions={{ headerShown: false }}>
-    <ExploreStack.Screen name="Explore" component={ExploreScreen} />
-    <ExploreStack.Screen name="AnimalDetail" component={AnimalDetailScreen} />
-  </ExploreStack.Navigator>
-);
+/* ======== Explore (tabs) ======== */
+/** Compatibilidad: CreateAnimalScreen tiene Props propios; lo adaptamos
+ *  al tipo esperado por ExploreStack sin usar `any`.
+ */
+const CreateAnimalCompat = CreateAnimalScreen as unknown as React.ComponentType;
 
-// Placeholder para Matches (sin inline function; incluye children para evitar TS error)
-const MatchesHome: React.FC = () => (
+/** Componente estable para evitar función inline en `component` (sin warnings) */
+const MatchesScreen: React.FC = () => (
   <Screen scrollable>
     <Matches />
   </Screen>
 );
 
-const MatchesStackNavigator: React.FC = () => (
-  <MatchesStack.Navigator screenOptions={{ headerShown: false }}>
-    <MatchesStack.Screen name="Matches" component={MatchesHome} />
-    <MatchesStack.Screen name="AnimalDetail" component={AnimalDetailScreen} />
-  </MatchesStack.Navigator>
+const ExploreStackNavigator: React.FC = () => (
+  <ExploreStack.Navigator screenOptions={{ headerShown: false }}>
+    <ExploreStack.Screen name="Explore" component={ExploreScreen} />
+    <ExploreStack.Screen name="AnimalDetail" component={AnimalDetailScreen} />
+    <ExploreStack.Screen name="Matches" component={MatchesScreen} />
+    <ExploreStack.Screen name="CreateAnimal" component={CreateAnimalCompat} />
+  </ExploreStack.Navigator>
 );
 
+/* ======== Services (tabs) ======== */
+const ServicesHome: React.FC = () => (
+  <Screen scrollable>
+    <Appbar.Header mode="center-aligned">
+      <Appbar.Content title="Servicios" />
+    </Appbar.Header>
+    {/* TODO: grid/cards de servicios */}
+  </Screen>
+);
+
+const ServicesStackNavigator: React.FC = () => (
+  <ServicesStack.Navigator screenOptions={{ headerShown: false }}>
+    <ServicesStack.Screen name="Services" component={ServicesHome} />
+  </ServicesStack.Navigator>
+);
+
+/* ======== Settings (tabs) ======== */
 const SettingsStackNavigator: React.FC = () => (
   <SettingsStack.Navigator screenOptions={{ headerShown: false }}>
     <SettingsStack.Screen name="Settings" component={SettingsScreen} />
@@ -117,8 +135,6 @@ type TabIconProps = { size: number; color: string; focused: boolean };
 
 const TabsView: React.FC = () => {
   const { theme } = useResolvedTheme();
-
-  // Fondo del tab bar según tema (oscuro/claro)
   const tabBg = (theme.colors as any).elevation?.level2 ?? theme.colors.surface;
   const borderTop = theme.dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
 
@@ -126,18 +142,17 @@ const TabsView: React.FC = () => {
     <Tabs.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarShowLabel: false, // 👈 solo iconos
+        tabBarShowLabel: false,
         tabBarActiveTintColor: theme.colors.primary,
         tabBarInactiveTintColor: theme.colors.onSurfaceDisabled,
         tabBarStyle: {
           backgroundColor: tabBg,
           borderTopColor: borderTop,
           borderTopWidth: 1,
-          height: 64, // conserva altura ideal
+          height: 64,
         },
       }}
     >
-      {/* 1. Feed */}
       <Tabs.Screen
         name="FeedTab"
         component={FeedStackNavigator}
@@ -148,7 +163,6 @@ const TabsView: React.FC = () => {
         }}
       />
 
-      {/* 2. Explorar */}
       <Tabs.Screen
         name="ExploreTab"
         component={ExploreStackNavigator}
@@ -159,10 +173,10 @@ const TabsView: React.FC = () => {
         }}
       />
 
-      {/* 3. “+” centrado — no navega al tab, abre CreateAnimal en el root */}
+      {/* “+” centrado — abre CreateAnimal dentro de Explore (tabs visibles) */}
       <Tabs.Screen
         name="Create"
-        component={MatchesHome /* componente definido, no inline */}
+        component={ServicesHome /* placeholder requerido por Tabs */}
         options={{
           tabBarIcon: ({ size }: { size: number }) => (
             <View
@@ -172,8 +186,7 @@ const TabsView: React.FC = () => {
                 borderRadius: 18,
                 justifyContent: 'center',
                 alignItems: 'center',
-                backgroundColor: theme.colors.primary, // relleno
-                // sombra sutil
+                backgroundColor: theme.colors.primary,
                 shadowColor: theme.colors.primary,
                 shadowOpacity: 0.3,
                 shadowRadius: 6,
@@ -191,24 +204,22 @@ const TabsView: React.FC = () => {
         }}
         listeners={({ navigation }) => ({
           tabPress: e => {
-            e.preventDefault(); // no cambies de tab
-            navigation.getParent()?.navigate('CreateAnimal');
+            e.preventDefault();
+            navigation.navigate('ExploreTab', { screen: 'CreateAnimal' });
           },
         })}
       />
 
-      {/* 4. Matches */}
       <Tabs.Screen
-        name="MatchesTab"
-        component={MatchesStackNavigator}
+        name="ServicesTab"
+        component={ServicesStackNavigator}
         options={{
           tabBarIcon: ({ size, color }: TabIconProps) => (
-            <Icon name="heart-outline" size={size} color={color} />
+            <Icon name="hand-heart-outline" size={size} color={color} />
           ),
         }}
       />
 
-      {/* 5. Ajustes */}
       <Tabs.Screen
         name="SettingsTab"
         component={SettingsStackNavigator}
@@ -225,7 +236,6 @@ const TabsView: React.FC = () => {
 /* ======== Root ======== */
 const RootNavigator: React.FC = () => {
   const { ready, isSignedIn } = useAuth();
-  const { theme } = useResolvedTheme();
 
   if (!ready) return <Loading variant="fullscreen" message="Cargando…" />;
 
@@ -233,17 +243,7 @@ const RootNavigator: React.FC = () => {
     <NavigationContainer>
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
         {isSignedIn ? (
-          <>
-            <RootStack.Screen name="AppTabs" component={TabsView} />
-            <RootStack.Screen
-              name="CreateAnimal"
-              component={CreateAnimalScreen}
-            />
-            <RootStack.Screen
-              name="AnimalDetail"
-              component={AnimalDetailScreen}
-            />
-          </>
+          <RootStack.Screen name="AppTabs" component={TabsView} />
         ) : (
           <>
             <RootStack.Screen name="Login" component={LoginScreen} />

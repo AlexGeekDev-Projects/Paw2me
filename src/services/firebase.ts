@@ -1,4 +1,7 @@
+// src/services/firebase.ts
 import { getApp } from '@react-native-firebase/app';
+
+// Firestore (modular)
 import * as FS from '@react-native-firebase/firestore';
 import {
   getFirestore,
@@ -14,17 +17,25 @@ import {
   limit,
   startAfter,
   onSnapshot,
+  getCountFromServer,
+  runTransaction,
   type FirebaseFirestoreTypes,
   deleteDoc,
 } from '@react-native-firebase/firestore';
 
-// RNFB auth/storage van por módulos separados
-import auth from '@react-native-firebase/auth';
-import storage from '@react-native-firebase/storage';
+// Auth / Storage (alias para evitar colisiones de nombre)
+import {
+  getAuth as rnGetAuth,
+  type FirebaseAuthTypes,
+} from '@react-native-firebase/auth';
+import {
+  getStorage as rnGetStorage,
+  type FirebaseStorageTypes,
+} from '@react-native-firebase/storage';
 
 type DocumentData = FirebaseFirestoreTypes.DocumentData;
 
-/** addDoc compatible (modular o namespaced) */
+/** addDoc compatible (RNFirebase modular o fallback .add) */
 export const addDoc = <T extends DocumentData>(
   col: FirebaseFirestoreTypes.CollectionReference<T>,
   data: T,
@@ -94,7 +105,7 @@ export function onDocSnapshot<T extends DocumentData>(
   throw new Error('onDocSnapshot not available.');
 }
 
-// Re-exports mínimos (modular)
+// Re-exports de Firestore (modular)
 export {
   getApp,
   getFirestore,
@@ -111,12 +122,15 @@ export {
   startAfter,
   deleteDoc,
   onSnapshot,
+  getCountFromServer,
+  runTransaction,
   type FirebaseFirestoreTypes,
 };
 
-// Exponer auth/storage como funciones para usar getAuth().currentUser etc.
-export const getAuth = auth; // getAuth().currentUser
-export const getStorage = storage; // getStorage()
+// ✅ Wrappers MODULARES (sin colisión de nombre y sin API namespaced)
+export const getAuth = (): FirebaseAuthTypes.Module => rnGetAuth(getApp());
+export const getStorage = (): FirebaseStorageTypes.Module =>
+  rnGetStorage(getApp());
 
 // Helpers
 export const nowTs = () => serverTimestamp();

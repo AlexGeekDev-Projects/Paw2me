@@ -1,4 +1,7 @@
+// src/models/animal.ts
 export type AnimalStatus = 'disponible' | 'en_proceso' | 'adoptado' | 'oculto';
+/** Alias para compatibilidad con imports existentes */
+export type AdoptionStatus = AnimalStatus;
 
 export type Species =
   | 'perro'
@@ -11,11 +14,18 @@ export type Species =
   | 'caballo'
   | 'otro';
 
+/** Size ahora es un tipo exportado (antes estaba inline) */
+export type Size = 'XS' | 'S' | 'M' | 'L' | 'XL';
+/** Útil para UIs (chips, selects) */
+export const SIZE_VALUES = ['XS', 'S', 'M', 'L', 'XL'] as const;
+
+export type Sex = 'macho' | 'hembra';
+
 export interface AnimalCore {
   name: string;
   species: Species;
-  size: 'XS' | 'S' | 'M' | 'L' | 'XL';
-  sex: 'macho' | 'hembra';
+  size: Size;
+  sex: Sex;
   ageMonths: number;
   ageUnknown?: boolean;
   mixedBreed: boolean;
@@ -53,9 +63,8 @@ export interface AnimalDoc extends AnimalCore {
   createdByPlatform?: 'ios' | 'android' | 'web';
   visibility?: 'public' | 'hidden' | 'banned';
   tags?: string[];
-  address?: string;
-  images?: string[]; // ← nuevo
-  matchCount?: number; // ← reemplazo de favoriteCount
+  images?: string[]; // nuevo
+  matchCount?: number; // reemplazo de favoriteCount
 }
 
 export type NewAnimalInput = Omit<AnimalDoc, 'id' | 'createdAt' | 'updatedAt'>;

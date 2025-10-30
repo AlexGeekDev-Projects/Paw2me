@@ -363,8 +363,8 @@ const ZoomableImage: React.FC<
                 ? FastImage.resizeMode.contain
                 : 'contain'
               : FastImage
-                ? FastImage.resizeMode.cover
-                : 'cover'
+              ? FastImage.resizeMode.cover
+              : 'cover'
           }
         />
       </Animated.View>
@@ -902,8 +902,8 @@ const PostCard: React.FC<Props> = ({
     typeof currentReaction !== 'undefined'
       ? currentReaction
       : data.reactedByMe
-        ? 'love'
-        : null;
+      ? 'love'
+      : null;
 
   // Handler con logs para depurar “love” fantasma
   const handleReact = useCallback(
@@ -1194,7 +1194,7 @@ const PostCard: React.FC<Props> = ({
 };
 
 const styles = StyleSheet.create({
-  card: { marginVertical: 8, overflow: 'hidden' },
+  card: { marginVertical: 8 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1340,6 +1340,8 @@ export default memo(PostCard, (a, b) => {
     x.id === y.id &&
     x.reactedByMe === y.reactedByMe &&
     x.reactionCount === y.reactionCount &&
+    x.commentCount === y.commentCount && // 👈 NUEVO
+    x.shareCount === y.shareCount && // 👈 CONSISTENCIA
     x.content === y.content &&
     (x.imageUrls?.[0] ?? '') === (y.imageUrls?.[0] ?? '') &&
     (x.videoUrls?.[0] ?? '') === (y.videoUrls?.[0] ?? '') &&

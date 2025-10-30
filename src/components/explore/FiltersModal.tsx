@@ -76,7 +76,6 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
       : DEFAULT_DISTANCE_KM,
   );
 
-  // sincroniza UI local al abrir
   useEffect(() => {
     if (!visible) return;
     setLocalSpecies(filters.species ?? null);
@@ -98,7 +97,6 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
     filters.distanceWasExplicit,
   ]);
 
-  // obtener center “suave” al habilitar distancia
   const attemptedRef = useRef(false);
   useEffect(() => {
     if (
@@ -144,23 +142,26 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.chipsScroll}
           >
-            {SPECIES_META.map(s => (
-              <Chip
-                key={s.key}
-                selected={localSpecies === s.key}
-                onPress={() =>
-                  setLocalSpecies(prev => (prev === s.key ? null : s.key))
-                }
-                icon={s.icon}
-                style={styles.chip}
-              >
-                {s.label}
-              </Chip>
-            ))}
+            {SPECIES_META.map(s => {
+              const selected = localSpecies === s.key;
+              return (
+                <Chip
+                  key={s.key}
+                  selected={selected}
+                  onPress={() =>
+                    setLocalSpecies(prev => (prev === s.key ? null : s.key))
+                  }
+                  icon={selected ? 'check' : s.icon}
+                  style={styles.chip}
+                >
+                  {s.label}
+                </Chip>
+              );
+            })}
             <Chip
               selected={localUrgent}
               onPress={() => setLocalUrgent(v => !v)}
-              icon="alert"
+              icon={localUrgent ? 'check' : 'alert'}
               style={styles.chip}
             >
               Urgente
@@ -171,15 +172,21 @@ const FiltersModal: React.FC<FiltersModalProps> = ({
             Tamaño
           </Text>
           <View style={styles.rowWrap}>
-            {SIZES.map(sz => (
-              <Chip
-                key={sz}
-                selected={localSize === sz}
-                onPress={() => setLocalSize(prev => (prev === sz ? null : sz))}
-              >
-                {sz}
-              </Chip>
-            ))}
+            {SIZES.map(sz => {
+              const selected = localSize === sz;
+              return (
+                <Chip
+                  key={sz}
+                  selected={selected}
+                  onPress={() =>
+                    setLocalSize(prev => (prev === sz ? null : sz))
+                  }
+                  {...(selected ? { icon: 'check' } : {})}
+                >
+                  {sz}
+                </Chip>
+              );
+            })}
           </View>
 
           <Text variant="labelLarge" style={styles.section}>

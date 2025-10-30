@@ -1,3 +1,4 @@
+// src/components/AnimalCard.tsx
 import React, {
   memo,
   useEffect,
@@ -20,10 +21,8 @@ import { Card, Text, useTheme, Chip } from 'react-native-paper';
 import { PawIconAnimated } from '@components/feedback/Loading';
 import { useAnimalReactions } from '@hooks/useAnimalReactions';
 
-import AnimalCommentsDrawer from '@components/comments/AnimalCommentsDrawer';
+import CommentsSheetPaw from '@components/comments/CommentsSheetPaw';
 import ReactionFooter from '@components/reactions/ReactionFooter';
-
-import { useAnimalCommentsCount } from '@hooks/useAnimalCommentsCount';
 
 import type { AnimalCardVM } from '@models/animal';
 import {
@@ -126,7 +125,7 @@ const extractFromChips = (chips?: readonly string[] | null) => {
   const clean = chips.map(s => s.trim()).filter(Boolean);
   const rawSize = clean.find(s => SIZE_WORDS.has(s.toLowerCase()));
   const rawBreed = clean.find(s => !SIZE_WORDS.has(s.toLowerCase()));
-  const breedV = rawBreed ? (title(rawBreed) ?? rawBreed) : undefined;
+  const breedV = rawBreed ? title(rawBreed) ?? rawBreed : undefined;
   const sizeV = normalizeSize(rawSize);
   return {
     ...(breedV ? { breed: breedV } : {}),
@@ -162,19 +161,17 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
   const size: string | undefined =
     normalizeSize(str(opt.size)) ?? inferred.size;
 
-  // Contadores (local optimista)
-  const commentsInitial =
-    typeof opt.comments === 'number' && Number.isFinite(opt.comments)
-      ? opt.comments
+  // Conteos mostrados en footer (igual que Feed: vienen del VM)
+  const commentsCount =
+    typeof (data as any).comments === 'number' &&
+    Number.isFinite((data as any).comments)
+      ? (data as any).comments
       : 0;
-  const sharesInitial =
+  const sharesCount =
     typeof (data as any).shares === 'number' &&
     Number.isFinite((data as any).shares)
       ? (data as any).shares
       : 0;
-
-  const commentsCount = useAnimalCommentsCount(data.id);
-  const sharesCount = sharesInitial;
 
   const handleShare = useCallback(async () => {
     try {
@@ -187,7 +184,8 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
   const openComments = useCallback(() => setCommentsOpen(true), []);
   const closeComments = useCallback(() => setCommentsOpen(false), []);
 
-  const cardW = useMemo(() => winW - 24, [winW]);
+  const { width: _winW } = useWindowDimensions();
+  const cardW = useMemo(() => _winW - 24, [_winW]);
   const dpr = PixelRatio.get();
 
   const coverUrl = rawCover
@@ -218,7 +216,6 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
       )
     : undefined;
 
-  // Altura (clamp 4:5..1.91:1)
   const [targetH, setTargetH] = useState<number>(() => Math.round(cardW / 1.2));
   useEffect(() => {
     let alive = true;
@@ -233,7 +230,6 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
     };
   }, [cardW, coverUrl]);
 
-  // Progressive fade
   const fullOpacity = useRef(new Animated.Value(0)).current;
   const thumbOpacity = useRef(new Animated.Value(0)).current;
   const [isLoading, setIsLoading] = useState(false);
@@ -278,9 +274,8 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
     }).start();
   };
 
-  // Overlay: altura = contenido + padding
   const [contentH, setContentH] = useState<number>(40);
-  const gradientH = Math.max(56, Math.ceil(contentH + PAD_V * 2 + 6));
+  const gradientH = Math.max(56, Math.ceil(contentH + 8 * 2 + 6));
   const onContentLayout = (e: LayoutChangeEvent): void =>
     setContentH(e.nativeEvent.layout.height);
 
@@ -340,7 +335,7 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
 
           {/* Contenido inferior */}
           <View
-            style={[styles.bottomContent, { paddingVertical: PAD_V }]}
+            style={[styles.bottomContent, { paddingVertical: 8 }]}
             onLayout={onContentLayout}
             pointerEvents="box-none"
           >
@@ -416,12 +411,10 @@ const AnimalCardComponent: React.FC<Props> = ({ data, onPress }) => {
         onSharePress={handleShare}
       />
 
-      {/* Cajón de comentarios */}
-      <AnimalCommentsDrawer
+      {/* Sheet de comentarios */}
+      <CommentsSheetPaw
         visible={commentsOpen}
-        animalId={data.id}
-        userId={userId}
-        onClose={closeComments}
+        pawId={data.id}
         onDismiss={closeComments}
       />
     </Card>
@@ -433,7 +426,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     marginVertical: 8,
     borderRadius: 16,
-    overflow: 'hidden',
+    // overflow: 'hidden',
   },
   media: { position: 'relative', width: '100%', backgroundColor: '#eee' },
   image: { width: '100%', height: '100%' },
@@ -506,6 +499,9 @@ export default memo(AnimalCardComponent, (a, b) => {
     x.name === y.name &&
     x.city === y.city &&
     x.species === y.species &&
+    // 👇 asegúrate de re-render cuando cambie comments/shares
+    (x as any).comments === (y as any).comments &&
+    (x as any).shares === (y as any).shares &&
     a.onPress === b.onPress
   );
 });

@@ -1,10 +1,21 @@
 // src/services/postCommentsService.ts
 import {
   getFirestore,
+  collection,
   doc,
   getDoc,
+  getDocs,
+  onSnapshot,
+  query,
+  orderBy,
+  limit,
+  startAfter,
+  deleteDoc,
+  getCountFromServer, // <- asegúrate de re-exportarlo desde @services/firebase
   type FirebaseFirestoreTypes,
 } from '@services/firebase';
+import { addDoc, updateDoc } from '@services/firebase'; // tus helpers compat
+
 import type {
   CommentDoc,
   CommentsPage,
@@ -16,7 +27,6 @@ type CommentFS = Readonly<{
   postId: string;
   authorUid: string;
   content: string;
-  // Soportamos Timestamp (si lo tenías), FieldValue (si algún lugar lo mete) y number para máxima compat.
   createdAt:
     | FirebaseFirestoreTypes.Timestamp
     | FirebaseFirestoreTypes.FieldValue
@@ -34,9 +44,11 @@ type CommentFS = Readonly<{
 const colRef = (
   postId: string,
 ): FirebaseFirestoreTypes.CollectionReference<CommentFS> =>
-  // compat API
-  getFirestore().collection(
-    `posts/${postId}/comments`,
+  collection(
+    getFirestore(),
+    'posts',
+    postId,
+    'comments',
   ) as unknown as FirebaseFirestoreTypes.CollectionReference<CommentFS>;
 
 const isTs = (v: unknown): v is FirebaseFirestoreTypes.Timestamp =>
@@ -53,7 +65,7 @@ const numFrom = (
   if (v == null) return null;
   if (typeof v === 'number') return v;
   if (isTs(v)) return v.toMillis();
-  // FieldValue (serverTimestamp placeholder) → usamos ahora mismo
+  // FieldValue (serverTimestamp placeholder) → usamos “ahora” como fallback
   return Date.now();
 };
 
@@ -73,18 +85,28 @@ const toDoc = (
   };
 };
 
-/** Lista paginada (retorna ascendente para render natural) */
+/** Lista paginada (devuelve en ascendente para render natural) */
 export async function listComments(
   postId: PostId,
   opts?: Readonly<{ limit?: number; after?: unknown | null }>,
 ): Promise<CommentsPage> {
   const L = Math.max(1, Math.min(50, opts?.limit ?? 20));
-  const col = colRef(postId);
+  const base = colRef(postId);
 
-  let q = col.orderBy('createdAt', 'desc').limit(L);
-  if (opts?.after) q = q.startAfter(opts.after as any);
+  const q = opts?.after
+    ? (query(
+        base,
+        orderBy('createdAt', 'desc'),
+        startAfter(opts.after as any),
+        limit(L),
+      ) as FirebaseFirestoreTypes.Query<CommentFS>)
+    : (query(
+        base,
+        orderBy('createdAt', 'desc'),
+        limit(L),
+      ) as unknown as FirebaseFirestoreTypes.Query<CommentFS>);
 
-  const ss = (await q.get()) as FirebaseFirestoreTypes.QuerySnapshot<CommentFS>;
+  const ss = await getDocs(q);
   const docs =
     ss.docs as FirebaseFirestoreTypes.QueryDocumentSnapshot<CommentFS>[];
   const itemsDesc = docs.map(toDoc);
@@ -102,39 +124,42 @@ export function listenCommentsHead(
   }>,
 ): () => void {
   const L = Math.max(1, Math.min(50, opts.limit ?? 20));
-  const q = colRef(postId).orderBy('createdAt', 'desc').limit(L);
+  const q = query(
+    colRef(postId),
+    orderBy('createdAt', 'desc'),
+    limit(L),
+  ) as FirebaseFirestoreTypes.Query<CommentFS>;
 
-  const off = q.onSnapshot(
-    (ss: FirebaseFirestoreTypes.QuerySnapshot<CommentFS>) => {
-      const docs =
-        ss.docs as FirebaseFirestoreTypes.QueryDocumentSnapshot<CommentFS>[];
-      const items = docs.map(toDoc).slice().reverse();
-      opts.onChange(items);
-    },
-  );
+  const off = onSnapshot(q, ss => {
+    const docs =
+      ss.docs as FirebaseFirestoreTypes.QueryDocumentSnapshot<CommentFS>[];
+    const items = docs.map(toDoc).slice().reverse();
+    opts.onChange(items);
+  });
+
   return off;
 }
 
-/** Crear comentario (compat) */
+/** Crear comentario (modular + helper compat) */
 export async function addComment(
   postId: PostId,
   uid: string,
   data: NewComment,
 ): Promise<CommentDoc> {
-  const col = colRef(postId);
-  const ref = await col.add({
+  const ref = await addDoc(colRef(postId), {
     postId,
     authorUid: uid,
     content: data.content.trim(),
     replyToId: data.replyToId ?? null,
-    // evitamos serverTimestamp por falta de export → número
     createdAt: Date.now(),
     updatedAt: null,
     deleted: false,
   } as CommentFS);
 
-  const snap =
-    (await ref.get()) as FirebaseFirestoreTypes.DocumentSnapshot<CommentFS>;
+  const snap = (await getDoc(
+    ref,
+  )) as FirebaseFirestoreTypes.DocumentSnapshot<CommentFS>;
+
   // normalizo a QueryDocumentSnapshot-like para reutilizar toDoc
   const asQuerySnap = {
     id: snap.id,
@@ -151,12 +176,18 @@ export async function editComment(
   commentId: string,
   content: string,
 ): Promise<void> {
-  await colRef(postId)
-    .doc(commentId)
-    .update({
-      content: content.trim(),
-      updatedAt: Date.now(),
-    } as Partial<CommentFS>);
+  const ref = doc(
+    getFirestore(),
+    'posts',
+    postId,
+    'comments',
+    commentId,
+  ) as FirebaseFirestoreTypes.DocumentReference<CommentFS>;
+
+  await updateDoc(ref, {
+    content: content.trim(),
+    updatedAt: Date.now(),
+  } as Partial<CommentFS>);
 }
 
 /** Borrar duro */
@@ -164,29 +195,31 @@ export async function deleteComment(
   postId: PostId,
   commentId: string,
 ): Promise<void> {
-  await colRef(postId).doc(commentId).delete();
+  const ref = doc(
+    getFirestore(),
+    'posts',
+    postId,
+    'comments',
+    commentId,
+  ) as FirebaseFirestoreTypes.DocumentReference<CommentFS>;
+
+  await deleteDoc(ref);
 }
 
-/** (Opcional) contar comentarios (placeholder eficiente requiere agregaciones) */
+/** Conteo de comentarios (usa aggregate; fallback a getDocs limitado) */
 export async function getCommentsCount(postId: PostId): Promise<number> {
-  const col = colRef(postId);
-
-  // 1) Intento con agregación del servidor (si la SDK la soporta)
   try {
-    // RNFirebase moderno expone count().get()
-    const agg: any = await (col as any).count().get();
-
-    // Algunos SDK exponen .data().count, otros .count directo
+    const q = query(colRef(postId)) as FirebaseFirestoreTypes.Query<CommentFS>;
+    const agg: any = await getCountFromServer(q as any);
     const n = typeof agg?.data === 'function' ? agg.data()?.count : agg?.count;
-
     return typeof n === 'number' ? n : 0;
   } catch {
-    // 2) Fallback (no ideal): traer hasta 1000 y contar tamaño
-    //    *Si luego necesitas precisión con miles de comentarios,
-    //     conviene un contador desnormalizado en el doc del post
-    const ss = (await col
-      .limit(1000)
-      .get()) as FirebaseFirestoreTypes.QuerySnapshot<CommentFS>;
+    const ss = await getDocs(
+      query(
+        colRef(postId),
+        limit(1000),
+      ) as FirebaseFirestoreTypes.Query<CommentFS>,
+    );
     return ss.size;
   }
 }

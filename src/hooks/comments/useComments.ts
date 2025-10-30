@@ -1,6 +1,17 @@
 // src/hooks/comments/useComments.ts
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getFirestore, type FirebaseFirestoreTypes } from '@services/firebase';
+import {
+  getFirestore,
+  collection,
+  query,
+  orderBy,
+  limit,
+  onSnapshot,
+  addDoc,
+  updateDoc,
+  doc,
+  type FirebaseFirestoreTypes,
+} from '@services/firebase';
 import type { CommentDoc, NewComment } from '@models/comment';
 
 export function useComments(
@@ -23,16 +34,17 @@ export function useComments(
   const [posting, setPosting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const db = getFirestore();
   const unsubRef = useRef<(() => void) | null>(null);
 
   const colRef = useMemo(() => {
     if (!postId) return null;
-    return (db as FirebaseFirestoreTypes.Module)
-      .collection('posts')
-      .doc(postId)
-      .collection('comments');
-  }, [db, postId]);
+    return collection(
+      getFirestore(),
+      'posts',
+      postId,
+      'comments',
+    ) as FirebaseFirestoreTypes.CollectionReference<FirebaseFirestoreTypes.DocumentData>;
+  }, [postId]);
 
   const mapDoc = useCallback(
     (
@@ -78,12 +90,10 @@ export function useComments(
     // Limpia suscripción previa
     unsubRef.current?.();
 
-    const q = colRef.orderBy('createdAt', 'asc').limit(50);
-
-    const unsubscribe = q.onSnapshot(
-      (
-        qs: FirebaseFirestoreTypes.QuerySnapshot<FirebaseFirestoreTypes.DocumentData>,
-      ) => {
+    const q = query(colRef, orderBy('createdAt', 'asc'), limit(50));
+    const unsubscribe = onSnapshot(
+      q as FirebaseFirestoreTypes.Query<FirebaseFirestoreTypes.DocumentData>,
+      qs => {
         const list: Readonly<CommentDoc>[] = qs.docs.map(mapDoc);
         setComments(list);
         setLoading(false);
@@ -120,14 +130,14 @@ export function useComments(
 
       setPosting(true);
       try {
-        await colRef.add({
+        await addDoc(colRef, {
           postId,
           authorUid: uid,
           content,
           createdAt: Date.now(),
-          replyToId: data?.replyToId ?? null,
+          ...(data?.replyToId != null ? { replyToId: data.replyToId } : {}),
           deleted: false,
-        } as Omit<CommentDoc, 'id' | 'updatedAt'>);
+        } as FirebaseFirestoreTypes.DocumentData);
       } catch (e: unknown) {
         const msg =
           (e as { message?: string })?.message ??
@@ -142,24 +152,36 @@ export function useComments(
 
   const edit = useCallback(
     async (id: string, content: string) => {
-      if (!colRef) return;
-      await colRef.doc(id).update({
+      const ref = doc(
+        getFirestore(),
+        'posts',
+        postId,
+        'comments',
+        id,
+      ) as FirebaseFirestoreTypes.DocumentReference<FirebaseFirestoreTypes.DocumentData>;
+      await updateDoc(ref, {
         content: String(content ?? '').trim(),
         updatedAt: Date.now(),
-      } as Partial<CommentDoc>);
+      } as Partial<FirebaseFirestoreTypes.DocumentData>);
     },
-    [colRef],
+    [postId],
   );
 
   const remove = useCallback(
     async (id: string) => {
-      if (!colRef) return;
-      await colRef.doc(id).update({
+      const ref = doc(
+        getFirestore(),
+        'posts',
+        postId,
+        'comments',
+        id,
+      ) as FirebaseFirestoreTypes.DocumentReference<FirebaseFirestoreTypes.DocumentData>;
+      await updateDoc(ref, {
         deleted: true,
         updatedAt: Date.now(),
-      } as Partial<CommentDoc>);
+      } as Partial<FirebaseFirestoreTypes.DocumentData>);
     },
-    [colRef],
+    [postId],
   );
 
   const loadMore = useCallback(async () => {

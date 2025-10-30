@@ -1,3 +1,4 @@
+// src/services/reactionsService.ts
 import {
   getFirestore,
   doc,
@@ -9,6 +10,8 @@ import {
   limit,
   nowTs,
   startAfter,
+  runTransaction,
+  onSnapshot,
   type FirebaseFirestoreTypes,
 } from '@services/firebase';
 
@@ -206,7 +209,8 @@ export function listenReactionCounts(
   cb: (counts: ReactionCountsDoc | null) => void,
 ): Unsub {
   const ref = countsDocRef(animalId);
-  return ref.onSnapshot(
+  return onSnapshot(
+    ref,
     (snap: FirebaseFirestoreTypes.DocumentSnapshot<ReactionCountsDoc>) => {
       if (!snap.exists()) {
         cb(null);
@@ -231,7 +235,8 @@ export function listenUserReaction(
   cb: (key: FireReactionKey | null) => void,
 ): Unsub {
   const ref = reactionDocRef(animalId, userId);
-  return ref.onSnapshot(
+  return onSnapshot(
+    ref,
     (snap: FirebaseFirestoreTypes.DocumentSnapshot<ReactionDoc>) => {
       if (!snap.exists()) {
         cb(null);
@@ -260,7 +265,8 @@ export function listenUserMatches(
     limit(typeof opts?.limit === 'number' && opts.limit > 0 ? opts.limit : 50),
   );
 
-  return qRef.onSnapshot(
+  return onSnapshot(
+    qRef,
     (snap: FirebaseFirestoreTypes.QuerySnapshot<UserMatchDoc>) => {
       const out = snap.docs.map(
         (
@@ -307,7 +313,8 @@ export async function setUserReaction(params: {
 }): Promise<void> {
   const { animalId, userId, next } = params;
 
-  await getFirestore().runTransaction(
+  await runTransaction(
+    getFirestore(),
     async (tx: FirebaseFirestoreTypes.Transaction) => {
       const rRef = reactionDocRef(animalId, userId);
       const cRef = countsDocRef(animalId);
@@ -344,11 +351,9 @@ export async function setUserReaction(params: {
       const now = nowTs();
 
       // guarda contadores
-      tx.set(
-        cRef,
-        { love, sad, match, updatedAt: now } satisfies ReactionCountsDoc,
-        { merge: true },
-      );
+      tx.set(cRef, { love, sad, match, updatedAt: now } as ReactionCountsDoc, {
+        merge: true,
+      });
 
       // guarda/elimina reacción de usuario
       if (next) {
@@ -431,7 +436,8 @@ export function listenReactorsByKey(
       ? query(col, where('key', '==', key), orderBy('updatedAt'), limit(n))
       : query(col, where('key', '==', key), limit(n));
 
-    currentUnsub = qRef.onSnapshot(
+    currentUnsub = onSnapshot(
+      qRef,
       (snap: FirebaseFirestoreTypes.QuerySnapshot<ReactionDoc>) => {
         const mapped = snap.docs.map(
           (
@@ -480,7 +486,8 @@ export function listenReactorsAll(
       ? query(col, orderBy('updatedAt'), limit(n))
       : query(col, limit(n));
 
-    currentUnsub = qRef.onSnapshot(
+    currentUnsub = onSnapshot(
+      qRef,
       (snap: FirebaseFirestoreTypes.QuerySnapshot<ReactionDoc>) => {
         const mapped = snap.docs.map(
           (
