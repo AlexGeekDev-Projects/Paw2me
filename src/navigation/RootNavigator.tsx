@@ -1,7 +1,7 @@
 // src/navigation/RootNavigator.tsx
 import React from 'react';
 import { View } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, StackActions } from '@react-navigation/native';
 import type { NavigatorScreenParams } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -92,14 +92,13 @@ const FeedStackNavigator: React.FC = () => (
 const CreateAnimalCompat = CreateAnimalScreen as unknown as React.ComponentType;
 
 /** Componente estable para evitar función inline en `component` (sin warnings) */
-const MatchesScreen: React.FC = () => (
-  <Screen scrollable>
-    <Matches />
-  </Screen>
-);
+const MatchesScreen: React.FC = () => <Matches />;
 
 const ExploreStackNavigator: React.FC = () => (
-  <ExploreStack.Navigator screenOptions={{ headerShown: false }}>
+  <ExploreStack.Navigator
+    initialRouteName="Explore"
+    screenOptions={{ headerShown: false }}
+  >
     <ExploreStack.Screen name="Explore" component={ExploreScreen} />
     <ExploreStack.Screen name="AnimalDetail" component={AnimalDetailScreen} />
     <ExploreStack.Screen name="Matches" component={MatchesScreen} />
@@ -171,6 +170,21 @@ const TabsView: React.FC = () => {
             <Icon name="paw-outline" size={size} color={color} />
           ),
         }}
+        listeners={({ navigation, route }) => ({
+          tabPress: e => {
+            // Si el tab ya está enfocado y hay pantallas encima del root, haz popToTop en el stack anidado.
+            const state: any = (route as any).state;
+            if (state?.type === 'stack' && state.index > 0) {
+              navigation.dispatch({
+                ...StackActions.popToTop(),
+                target: state.key, // MUY importante: enviar al stack anidado
+              });
+              return;
+            }
+            // Si vienes de otro tab o todavía no hay state del hijo, fuerza ir al root de Explore
+            navigation.navigate('ExploreTab', { screen: 'Explore' });
+          },
+        })}
       />
 
       {/* “+” centrado — abre CreateAnimal dentro de Explore (tabs visibles) */}

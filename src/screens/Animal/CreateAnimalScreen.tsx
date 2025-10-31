@@ -9,6 +9,7 @@ import {
   Platform,
   Pressable,
   Modal,
+  StatusBar,
 } from 'react-native';
 import {
   TextInput,
@@ -28,6 +29,7 @@ import {
   Dialog,
   Portal,
 } from 'react-native-paper';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   launchImageLibrary,
@@ -56,7 +58,10 @@ import { useUserLocation } from '@hooks/useUserLocation';
 import { reverseGeocode } from '@services/geoService';
 
 // Tipado de navegación: agregamos AnimalDetail localmente
-type NavParamList = RootStackParamList & { AnimalDetail: { id: string } };
+type NavParamList = RootStackParamList & {
+  CreateAnimal: undefined; // o el tipo real si recibe params
+  AnimalDetail: { id: string };
+};
 type Props = NativeStackScreenProps<NavParamList, 'CreateAnimal'>;
 
 const DRAFT_KEY = 'CreateAnimalDraft:v1';
@@ -108,10 +113,10 @@ const extFromCT = (ct: ImgContentType) =>
   ct === 'image/png'
     ? 'png'
     : ct === 'image/webp'
-      ? 'webp'
-      : ct === 'image/heic' || ct === 'image/heif'
-        ? 'heic'
-        : 'jpg';
+    ? 'webp'
+    : ct === 'image/heic' || ct === 'image/heif'
+    ? 'heic'
+    : 'jpg';
 
 type UploadParams =
   | ({ kind: 'base64'; base64: string } & {
@@ -402,7 +407,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
   const rehydrateAsset = (uri?: string): Asset | undefined =>
     uri ? ({ uri } as Asset) : undefined;
   const rehydrateAssets = (uris: string[]): Asset[] =>
-    uris.filter(Boolean).map(u => ({ uri: u }) as Asset);
+    uris.filter(Boolean).map(u => ({ uri: u } as Asset));
 
   const saveDraft = useCallback(async () => {
     const draft: Draft = {
@@ -525,7 +530,9 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
       if (p) galleryParams.push(p);
       else
         mediaWarnings.push(
-          `Imagen ${i + 1}: sin base64 y URI no compatible (p. ej. ph://). Se omitió.`,
+          `Imagen ${
+            i + 1
+          }: sin base64 y URI no compatible (p. ej. ph://). Se omitió.`,
         );
     });
 
@@ -699,507 +706,521 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <Screen style={styles.container}>
-      <PageHeader
-        title="Nueva huellita"
-        subtitle="Completa el perfil para publicación"
-        onBack={() => navigation.goBack()}
-      />
+      <StatusBar barStyle="light-content" />
+      <SafeAreaView style={styles.flex} edges={['top', 'bottom']}>
+        <PageHeader
+          title="Nueva huellita"
+          subtitle="Completa el perfil para publicación"
+          onBack={() =>
+            (navigation as any).navigate('AppTabs', {
+              screen: 'ExploreTab',
+              params: { screen: 'Explore' },
+            })
+          }
+        />
 
-      {/* Stepper */}
-      <View style={styles.stepperWrap}>
-        <View style={styles.stepsRow}>
-          <Chip
-            compact
-            selected={step1Done}
-            icon={step1Done ? 'check' : 'numeric-1-circle-outline'}
-            onPress={() => {}}
-          >
-            Datos
-          </Chip>
-          <Chip
-            compact
-            selected={step2Done}
-            icon={step2Done ? 'check' : 'numeric-2-circle-outline'}
-            onPress={() => {}}
-          >
-            Ubicación
-          </Chip>
-          <Chip
-            compact
-            selected={step3Done}
-            icon={step3Done ? 'check' : 'numeric-3-circle-outline'}
-            onPress={() => {}}
-          >
-            Fotos
-          </Chip>
-        </View>
-        <ProgressBar progress={stepProgress} style={styles.progress} />
-      </View>
-
-      <KeyboardAvoidingView
-        behavior={Platform.select({ ios: 'padding', android: undefined })}
-        style={styles.flex}
-      >
-        <ScrollView
-          contentInsetAdjustmentBehavior="automatic"
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          nestedScrollEnabled
-        >
-          {/* Nombre */}
-          <Section title="Nombre *" top={0}>
-            <TextInput
-              mode="outlined"
-              dense
-              value={name}
-              onChangeText={setName}
-              placeholder="Nombre"
-              style={styles.input}
-            />
-          </Section>
-
-          {/* Especie */}
-          <Section title="Especie *">
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.hChips}
+        {/* Stepper */}
+        <View style={styles.stepperWrap}>
+          <View style={styles.stepsRow}>
+            <Chip
+              compact
+              selected={step1Done}
+              icon={step1Done ? 'check' : 'numeric-1-circle-outline'}
+              onPress={() => {}}
             >
-              {speciesOptions.map(s => (
-                <Chip
-                  key={s}
-                  selected={species === s}
-                  onPress={() => setSpecies(s)}
-                  style={styles.chip}
-                >
-                  {s}
-                </Chip>
-              ))}
-            </ScrollView>
-          </Section>
+              Datos
+            </Chip>
+            <Chip
+              compact
+              selected={step2Done}
+              icon={step2Done ? 'check' : 'numeric-2-circle-outline'}
+              onPress={() => {}}
+            >
+              Ubicación
+            </Chip>
+            <Chip
+              compact
+              selected={step3Done}
+              icon={step3Done ? 'check' : 'numeric-3-circle-outline'}
+              onPress={() => {}}
+            >
+              Fotos
+            </Chip>
+          </View>
+          <ProgressBar progress={stepProgress} style={styles.progress} />
+        </View>
 
-          {/* Tamaño */}
-          <Section title="Tamaño *">
-            <SegmentedButtons
-              value={size}
-              onValueChange={v => setSize(v as (typeof sizes)[number])}
-              buttons={sizes.map(s => ({
-                value: s,
-                label: s,
-              }))}
-              density="regular"
-              style={{ marginTop: 2 }}
-            />
-          </Section>
-
-          {/* Sexo */}
-          <Section title="Sexo *">
-            <SegmentedButtons
-              value={sex}
-              onValueChange={v => setSex(v as (typeof sexes)[number])}
-              buttons={[
-                { value: 'macho', label: 'Macho' },
-                { value: 'hembra', label: 'Hembra' },
-              ]}
-              density="regular"
-              style={{ marginTop: 2 }}
-            />
-          </Section>
-
-          {/* Edad */}
-          <Section title="Edad *">
-            <View style={styles.switchRow}>
-              <Text>Desconocida</Text>
-              <Switch value={ageUnknown} onValueChange={setAgeUnknown} />
-            </View>
-            {ageUnknown ? null : (
+        <KeyboardAvoidingView
+          behavior={Platform.select({ ios: 'padding', android: undefined })}
+          style={styles.flex}
+        >
+          <ScrollView
+            contentInsetAdjustmentBehavior="automatic"
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
+            {/* Nombre */}
+            <Section title="Nombre *" top={0}>
               <TextInput
                 mode="outlined"
                 dense
-                keyboardType="number-pad"
-                value={ageMonths}
-                onChangeText={setAgeMonths}
+                value={name}
+                onChangeText={setName}
+                placeholder="Nombre"
                 style={styles.input}
-                right={<TextInput.Affix text="meses" />}
               />
-            )}
-          </Section>
+            </Section>
 
-          {/* Salud */}
-          <Section title="Salud">
-            <View style={styles.switchRow}>
-              <Text>Raza mixta</Text>
-              <Switch value={mixedBreed} onValueChange={onToggleMixed} />
-            </View>
-            <View style={styles.switchRow}>
-              <Text>Esterilizado</Text>
-              <Switch value={sterilized} onValueChange={setSterilized} />
-            </View>
-            <View style={styles.switchRow}>
-              <Text>Vacunado</Text>
-              <Switch value={vaccinated} onValueChange={setVaccinated} />
-            </View>
-          </Section>
-
-          {/* Raza */}
-          <Section title="Raza * si no es mixto">
-            <SelectInput
-              label={loadingBreeds ? 'Cargando razas…' : 'Raza'}
-              value={breedCode}
-              onChange={onChangeBreed}
-              options={breedOpts}
-            />
-          </Section>
-
-          {/* Historia (OBLIGATORIA) */}
-          <Section title="Historia *">
-            <TextInput
-              mode="outlined"
-              multiline
-              numberOfLines={6}
-              value={story}
-              onChangeText={setStory}
-              placeholder="Cuenta su historia: cómo llegó, su personalidad, avances y qué necesita."
-              maxLength={1200}
-              right={<TextInput.Affix text={`${story.length}/1200`} />}
-              style={[styles.input, { textAlignVertical: 'top' }]}
-              error={!story.trim()}
-            />
-            {!story.trim() ? (
-              <HelperText type="error" visible>
-                La historia es obligatoria.
-              </HelperText>
-            ) : (
-              <Text variant="bodySmall" style={styles.helperNote}>
-                Tip: sé específico y honesto. Historias breves con detalles
-                concretos generan más empatía.
-              </Text>
-            )}
-          </Section>
-
-          {/* ¿Cómo es? (tags) */}
-          <Section title="¿Cómo es? (etiquetas) *">
-            <View
-              style={[
-                tags.length === 0 && styles.requiredWrap,
-                { borderRadius: 12 },
-              ]}
-            >
+            {/* Especie */}
+            <Section title="Especie *">
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                contentContainerStyle={[styles.hChips, { padding: 4 }]}
+                contentContainerStyle={styles.hChips}
               >
-                {tagOptions.map(t => (
+                {speciesOptions.map(s => (
                   <Chip
-                    key={t}
-                    selected={tags.includes(t)}
-                    onPress={() => toggleTag(t)}
+                    key={s}
+                    selected={species === s}
+                    onPress={() => setSpecies(s)}
                     style={styles.chip}
                   >
-                    {t}
+                    {s}
                   </Chip>
                 ))}
               </ScrollView>
-            </View>
-            {tags.length === 0 ? (
-              <HelperText type="error" visible>
-                Selecciona al menos una etiqueta.
-              </HelperText>
-            ) : (
-              <Text variant="bodySmall" style={styles.helperNote}>
-                Estas etiquetas se usarán en filtros y búsquedas.
-              </Text>
-            )}
-          </Section>
+            </Section>
 
-          {/* Ubicación ——— justo DESPUÉS de “¿Cómo es?” */}
-          <LocationPicker
-            headTitle="Ubicación *"
-            value={geo}
-            onChange={(v: CoordChange) => {
-              if (v.lat === 0 && v.lng === 0) {
-                setGeo(undefined);
-                setDerivedCountry(undefined);
-                setDerivedCity(undefined);
-                setDerivedAddress(undefined);
-                return;
-              }
-              setGeo({ lat: v.lat, lng: v.lng });
-              if (v.countryCode) setDerivedCountry(v.countryCode);
-              if (v.city) setDerivedCity(v.city);
-              if (v.address) setDerivedAddress(v.address);
-            }}
-            onUseMyLocation={handleUseMyLocation}
-            locating={locating}
-          />
+            {/* Tamaño */}
+            <Section title="Tamaño *">
+              <SegmentedButtons
+                value={size}
+                onValueChange={v => setSize(v as (typeof sizes)[number])}
+                buttons={sizes.map(s => ({
+                  value: s,
+                  label: s,
+                }))}
+                density="regular"
+                style={{ marginTop: 2 }}
+              />
+            </Section>
 
-          {/* Error de localización */}
-          {locateError ? (
-            <HelperText type="error" visible style={{ marginTop: 6 }}>
-              {locateError}
-            </HelperText>
-          ) : null}
+            {/* Sexo */}
+            <Section title="Sexo *">
+              <SegmentedButtons
+                value={sex}
+                onValueChange={v => setSex(v as (typeof sexes)[number])}
+                buttons={[
+                  { value: 'macho', label: 'Macho' },
+                  { value: 'hembra', label: 'Hembra' },
+                ]}
+                density="regular"
+                style={{ marginTop: 2 }}
+              />
+            </Section>
 
-          {/* Dirección derivada */}
-          {derivedAddress ? (
-            <Card
-              mode="contained"
-              style={[styles.addressCard, { marginTop: 8 }]}
-            >
-              <View style={styles.addressClip}>
-                <List.Item
-                  title={derivedAddress}
-                  description={
-                    derivedCity
-                      ? `${derivedCity}${derivedCountry ? `, ${derivedCountry}` : ''}`
-                      : (derivedCountry ?? '')
-                  }
-                  left={props => <List.Icon {...props} icon="map-marker" />}
-                />
+            {/* Edad */}
+            <Section title="Edad *">
+              <View style={styles.switchRow}>
+                <Text>Desconocida</Text>
+                <Switch value={ageUnknown} onValueChange={setAgeUnknown} />
               </View>
-            </Card>
-          ) : null}
+              {ageUnknown ? null : (
+                <TextInput
+                  mode="outlined"
+                  dense
+                  keyboardType="number-pad"
+                  value={ageMonths}
+                  onChangeText={setAgeMonths}
+                  style={styles.input}
+                  right={<TextInput.Affix text="meses" />}
+                />
+              )}
+            </Section>
 
-          {/* Fotos */}
-          <Section title="Fotos *">
-            <View
-              style={[
-                styles.mediaRow,
-                !hasAnyPhoto && styles.requiredWrap,
-                { padding: 8, borderRadius: 12 },
-              ]}
-            >
-              <Button
+            {/* Salud */}
+            <Section title="Salud">
+              <View style={styles.switchRow}>
+                <Text>Raza mixta</Text>
+                <Switch value={mixedBreed} onValueChange={onToggleMixed} />
+              </View>
+              <View style={styles.switchRow}>
+                <Text>Esterilizado</Text>
+                <Switch value={sterilized} onValueChange={setSterilized} />
+              </View>
+              <View style={styles.switchRow}>
+                <Text>Vacunado</Text>
+                <Switch value={vaccinated} onValueChange={setVaccinated} />
+              </View>
+            </Section>
+
+            {/* Raza */}
+            <Section title="Raza * si no es mixto">
+              <SelectInput
+                label={loadingBreeds ? 'Cargando razas…' : 'Raza'}
+                value={breedCode}
+                onChange={onChangeBreed}
+                options={breedOpts}
+              />
+            </Section>
+
+            {/* Historia (OBLIGATORIA) */}
+            <Section title="Historia *">
+              <TextInput
                 mode="outlined"
-                onPress={pickImages}
-                icon="image-multiple-outline"
+                multiline
+                numberOfLines={6}
+                value={story}
+                onChangeText={setStory}
+                placeholder="Cuenta su historia: cómo llegó, su personalidad, avances y qué necesita."
+                maxLength={1200}
+                right={<TextInput.Affix text={`${story.length}/1200`} />}
+                style={[styles.input, { textAlignVertical: 'top' }]}
+                error={!story.trim()}
+              />
+              {!story.trim() ? (
+                <HelperText type="error" visible>
+                  La historia es obligatoria.
+                </HelperText>
+              ) : (
+                <Text variant="bodySmall" style={styles.helperNote}>
+                  Tip: sé específico y honesto. Historias breves con detalles
+                  concretos generan más empatía.
+                </Text>
+              )}
+            </Section>
+
+            {/* ¿Cómo es? (tags) */}
+            <Section title="¿Cómo es? (etiquetas) *">
+              <View
+                style={[
+                  tags.length === 0 && styles.requiredWrap,
+                  { borderRadius: 12 },
+                ]}
               >
-                Elegir fotos…
-              </Button>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={[styles.hChips, { padding: 4 }]}
+                >
+                  {tagOptions.map(t => (
+                    <Chip
+                      key={t}
+                      selected={tags.includes(t)}
+                      onPress={() => toggleTag(t)}
+                      style={styles.chip}
+                    >
+                      {t}
+                    </Chip>
+                  ))}
+                </ScrollView>
+              </View>
+              {tags.length === 0 ? (
+                <HelperText type="error" visible>
+                  Selecciona al menos una etiqueta.
+                </HelperText>
+              ) : (
+                <Text variant="bodySmall" style={styles.helperNote}>
+                  Estas etiquetas se usarán en filtros y búsquedas.
+                </Text>
+              )}
+            </Section>
 
-              {cover && hasUri(cover) ? (
-                <View style={styles.coverWrap}>
-                  <Image source={{ uri: cover.uri }} style={styles.cover} />
-                  <Chip compact icon="crown-outline" style={styles.coverBadge}>
-                    Portada
-                  </Chip>
-                  <IconButton
-                    icon="delete-outline"
-                    size={18}
-                    onPress={removeCover}
-                    style={styles.delCover}
-                    containerColor="rgba(0,0,0,0.45)"
-                    iconColor="#fff"
-                    accessibilityLabel="Eliminar portada"
-                  />
-                </View>
-              ) : null}
-            </View>
+            {/* Ubicación ——— justo DESPUÉS de “¿Cómo es?” */}
+            <LocationPicker
+              headTitle="Ubicación *"
+              value={geo}
+              onChange={(v: CoordChange) => {
+                if (v.lat === 0 && v.lng === 0) {
+                  setGeo(undefined);
+                  setDerivedCountry(undefined);
+                  setDerivedCity(undefined);
+                  setDerivedAddress(undefined);
+                  return;
+                }
+                setGeo({ lat: v.lat, lng: v.lng });
+                if (v.countryCode) setDerivedCountry(v.countryCode);
+                if (v.city) setDerivedCity(v.city);
+                if (v.address) setDerivedAddress(v.address);
+              }}
+              onUseMyLocation={handleUseMyLocation}
+              locating={locating}
+            />
 
-            <Text variant="bodySmall" style={styles.infoText}>
-              La primera foto que elijas se usará como{' '}
-              <Text style={{ fontWeight: '600' }}>portada</Text>.
-            </Text>
-            {!hasAnyPhoto ? (
-              <HelperText type="error" visible>
-                Agrega al menos una foto (puede ser portada o de la galería).
+            {/* Error de localización */}
+            {locateError ? (
+              <HelperText type="error" visible style={{ marginTop: 6 }}>
+                {locateError}
               </HelperText>
             ) : null}
 
-            {gallery.length > 0 ? (
-              <View style={styles.galleryPreview}>
-                {gallery.filter(hasUri).map(a => {
-                  const originalIndex = gallery.findIndex(
-                    g => hasUri(g) && g.uri === a.uri,
-                  );
-                  return (
-                    <Pressable
-                      key={`${originalIndex}-${a.uri}`}
-                      onLongPress={() => {
-                        setActionIdx(originalIndex);
-                        setActionVisible(true);
-                      }}
-                      style={styles.thumbWrap}
+            {/* Dirección derivada */}
+            {derivedAddress ? (
+              <Card
+                mode="contained"
+                style={[styles.addressCard, { marginTop: 8 }]}
+              >
+                <View style={styles.addressClip}>
+                  <List.Item
+                    title={derivedAddress}
+                    description={
+                      derivedCity
+                        ? `${derivedCity}${
+                            derivedCountry ? `, ${derivedCountry}` : ''
+                          }`
+                        : derivedCountry ?? ''
+                    }
+                    left={props => <List.Icon {...props} icon="map-marker" />}
+                  />
+                </View>
+              </Card>
+            ) : null}
+
+            {/* Fotos */}
+            <Section title="Fotos *">
+              <View
+                style={[
+                  styles.mediaRow,
+                  !hasAnyPhoto && styles.requiredWrap,
+                  { padding: 8, borderRadius: 12 },
+                ]}
+              >
+                <Button
+                  mode="outlined"
+                  onPress={pickImages}
+                  icon="image-multiple-outline"
+                >
+                  Elegir fotos…
+                </Button>
+
+                {cover && hasUri(cover) ? (
+                  <View style={styles.coverWrap}>
+                    <Image source={{ uri: cover.uri }} style={styles.cover} />
+                    <Chip
+                      compact
+                      icon="crown-outline"
+                      style={styles.coverBadge}
                     >
-                      <Image source={{ uri: a.uri }} style={styles.thumb} />
-                      {/* Botón borrar directo */}
-                      <IconButton
-                        icon="close"
-                        size={16}
-                        onPress={() => removeFromGallery(originalIndex)}
-                        style={styles.delThumb}
-                        containerColor="rgba(0,0,0,0.45)"
-                        iconColor="#fff"
-                        accessibilityLabel="Eliminar imagen"
-                      />
-                      {/* Botón menú contextual */}
-                      <IconButton
-                        icon="dots-vertical"
-                        size={16}
-                        onPress={() => {
+                      Portada
+                    </Chip>
+                    <IconButton
+                      icon="delete-outline"
+                      size={18}
+                      onPress={removeCover}
+                      style={styles.delCover}
+                      containerColor="rgba(0,0,0,0.45)"
+                      iconColor="#fff"
+                      accessibilityLabel="Eliminar portada"
+                    />
+                  </View>
+                ) : null}
+              </View>
+
+              <Text variant="bodySmall" style={styles.infoText}>
+                La primera foto que elijas se usará como{' '}
+                <Text style={{ fontWeight: '600' }}>portada</Text>.
+              </Text>
+              {!hasAnyPhoto ? (
+                <HelperText type="error" visible>
+                  Agrega al menos una foto (puede ser portada o de la galería).
+                </HelperText>
+              ) : null}
+
+              {gallery.length > 0 ? (
+                <View style={styles.galleryPreview}>
+                  {gallery.filter(hasUri).map(a => {
+                    const originalIndex = gallery.findIndex(
+                      g => hasUri(g) && g.uri === a.uri,
+                    );
+                    return (
+                      <Pressable
+                        key={`${originalIndex}-${a.uri}`}
+                        onLongPress={() => {
                           setActionIdx(originalIndex);
                           setActionVisible(true);
                         }}
-                        style={styles.menuThumb}
-                        containerColor="rgba(0,0,0,0.45)"
-                        iconColor="#fff"
-                        accessibilityLabel="Más acciones"
-                      />
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ) : null}
-          </Section>
+                        style={styles.thumbWrap}
+                      >
+                        <Image source={{ uri: a.uri }} style={styles.thumb} />
+                        {/* Botón borrar directo */}
+                        <IconButton
+                          icon="close"
+                          size={16}
+                          onPress={() => removeFromGallery(originalIndex)}
+                          style={styles.delThumb}
+                          containerColor="rgba(0,0,0,0.45)"
+                          iconColor="#fff"
+                          accessibilityLabel="Eliminar imagen"
+                        />
+                        {/* Botón menú contextual */}
+                        <IconButton
+                          icon="dots-vertical"
+                          size={16}
+                          onPress={() => {
+                            setActionIdx(originalIndex);
+                            setActionVisible(true);
+                          }}
+                          style={styles.menuThumb}
+                          containerColor="rgba(0,0,0,0.45)"
+                          iconColor="#fff"
+                          accessibilityLabel="Más acciones"
+                        />
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
+            </Section>
 
-          {/* Errores / Submit */}
-          {errors.length > 0 ? (
-            <HelperText type="error" visible style={styles.helper}>
-              {errors.join('  •  ')}
-            </HelperText>
-          ) : submitError ? (
-            <HelperText type="error" visible style={styles.helper}>
-              {submitError}
-            </HelperText>
-          ) : (
-            <View style={styles.spacer} />
-          )}
+            {/* Errores / Submit */}
+            {errors.length > 0 ? (
+              <HelperText type="error" visible style={styles.helper}>
+                {errors.join('  •  ')}
+              </HelperText>
+            ) : submitError ? (
+              <HelperText type="error" visible style={styles.helper}>
+                {submitError}
+              </HelperText>
+            ) : (
+              <View style={styles.spacer} />
+            )}
 
-          <Divider style={{ marginVertical: 8, opacity: 0.6 }} />
+            <Divider style={{ marginVertical: 8, opacity: 0.6 }} />
 
-          <Button
-            mode="contained"
-            onPress={onSubmit}
-            disabled={disabled}
-            style={styles.cta}
-            contentStyle={{ paddingVertical: 8 }}
-            icon="check-circle"
-          >
-            Publicar
-          </Button>
-        </ScrollView>
-      </KeyboardAvoidingView>
+            <Button
+              mode="contained"
+              onPress={onSubmit}
+              disabled={disabled}
+              style={styles.cta}
+              contentStyle={{ paddingVertical: 8 }}
+              icon="check-circle"
+            >
+              Publicar
+            </Button>
+          </ScrollView>
+        </KeyboardAvoidingView>
 
-      {/* FAB: Guardar borrador */}
-      <FAB
-        icon="content-save-outline"
-        label="Guardar borrador"
-        onPress={saveDraft}
-        style={styles.fab}
-        variant="secondary"
-      />
-
-      {submitting ? (
-        <Loading
-          variant="fullscreen"
-          progress={progress}
-          message="Publicando…"
+        {/* FAB: Guardar borrador */}
+        <FAB
+          icon="content-save-outline"
+          label="Guardar borrador"
+          onPress={saveDraft}
+          style={styles.fab}
+          variant="secondary"
         />
-      ) : null}
 
-      <Snackbar
-        visible={snack.visible}
-        onDismiss={() => setSnack({ visible: false, msg: '' })}
-        action={{
-          label: 'Borrar',
-          onPress: () => {
-            void clearDraft();
-          },
-        }}
-        duration={2500}
-      >
-        {snack.msg}
-      </Snackbar>
+        {submitting ? (
+          <Loading
+            variant="fullscreen"
+            progress={progress}
+            message="Publicando…"
+          />
+        ) : null}
 
-      {/* Menú de acciones sobre imagen */}
-      <Portal>
-        <Dialog
-          visible={actionVisible}
-          onDismiss={() => setActionVisible(false)}
+        <Snackbar
+          visible={snack.visible}
+          onDismiss={() => setSnack({ visible: false, msg: '' })}
+          action={{
+            label: 'Borrar',
+            onPress: () => {
+              void clearDraft();
+            },
+          }}
+          duration={2500}
         >
-          <Dialog.Title>Acciones de la foto</Dialog.Title>
-          <Dialog.Content>
-            <List.Item
-              title="Hacer portada"
-              left={p => <List.Icon {...p} icon="crown-outline" />}
-              onPress={() => {
-                if (actionIdx != null) promoteToCover(actionIdx);
-                setActionVisible(false);
-              }}
-            />
-            <List.Item
-              title="Mover al inicio"
-              left={p => <List.Icon {...p} icon="arrow-collapse-up" />}
-              onPress={() => {
-                if (actionIdx != null) moveToStart(actionIdx);
-                setActionVisible(false);
-              }}
-            />
-            <List.Item
-              title="Ver"
-              left={p => <List.Icon {...p} icon="image" />}
-              onPress={() => {
-                if (actionIdx != null) {
-                  const a = gallery[actionIdx];
-                  if (a && hasUri(a)) {
-                    setViewer({ visible: true, uri: a.uri });
+          {snack.msg}
+        </Snackbar>
+
+        {/* Menú de acciones sobre imagen */}
+        <Portal>
+          <Dialog
+            visible={actionVisible}
+            onDismiss={() => setActionVisible(false)}
+          >
+            <Dialog.Title>Acciones de la foto</Dialog.Title>
+            <Dialog.Content>
+              <List.Item
+                title="Hacer portada"
+                left={p => <List.Icon {...p} icon="crown-outline" />}
+                onPress={() => {
+                  if (actionIdx != null) promoteToCover(actionIdx);
+                  setActionVisible(false);
+                }}
+              />
+              <List.Item
+                title="Mover al inicio"
+                left={p => <List.Icon {...p} icon="arrow-collapse-up" />}
+                onPress={() => {
+                  if (actionIdx != null) moveToStart(actionIdx);
+                  setActionVisible(false);
+                }}
+              />
+              <List.Item
+                title="Ver"
+                left={p => <List.Icon {...p} icon="image" />}
+                onPress={() => {
+                  if (actionIdx != null) {
+                    const a = gallery[actionIdx];
+                    if (a && hasUri(a)) {
+                      setViewer({ visible: true, uri: a.uri });
+                    }
                   }
-                }
-                setActionVisible(false);
-              }}
-            />
-            <List.Item
-              title="Eliminar"
-              titleStyle={{ color: '#d32f2f' }}
-              left={p => (
-                <List.Icon {...p} icon="delete-outline" color="#d32f2f" />
-              )}
-              onPress={() => {
-                if (actionIdx != null) removeFromGallery(actionIdx);
-                setActionVisible(false);
-              }}
-            />
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => setActionVisible(false)}>Cerrar</Button>
-          </Dialog.Actions>
-        </Dialog>
-      </Portal>
+                  setActionVisible(false);
+                }}
+              />
+              <List.Item
+                title="Eliminar"
+                titleStyle={{ color: '#d32f2f' }}
+                left={p => (
+                  <List.Icon {...p} icon="delete-outline" color="#d32f2f" />
+                )}
+                onPress={() => {
+                  if (actionIdx != null) removeFromGallery(actionIdx);
+                  setActionVisible(false);
+                }}
+              />
+            </Dialog.Content>
+            <Dialog.Actions>
+              <Button onPress={() => setActionVisible(false)}>Cerrar</Button>
+            </Dialog.Actions>
+          </Dialog>
+        </Portal>
 
-      {/* Visor de imagen (fullscreen, proporciones correctas) */}
-      <Modal
-        visible={viewer.visible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setViewer({ visible: false })}
-      >
-        <View style={styles.viewerBackdrop}>
-          {/* Cerrar tocando fuera */}
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => setViewer({ visible: false })}
-          />
-
-          {viewer.uri ? (
-            <Image
-              source={{ uri: viewer.uri }}
-              style={styles.viewerImg}
-              resizeMode="contain"
+        {/* Visor de imagen (fullscreen, proporciones correctas) */}
+        <Modal
+          visible={viewer.visible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setViewer({ visible: false })}
+        >
+          <View style={styles.viewerBackdrop}>
+            {/* Cerrar tocando fuera */}
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => setViewer({ visible: false })}
             />
-          ) : null}
 
-          <IconButton
-            icon="close"
-            size={22}
-            onPress={() => setViewer({ visible: false })}
-            style={styles.viewerClose}
-            containerColor="rgba(0,0,0,0.55)"
-            iconColor="#fff"
-            accessibilityLabel="Cerrar visor"
-          />
-        </View>
-      </Modal>
+            {viewer.uri ? (
+              <Image
+                source={{ uri: viewer.uri }}
+                style={styles.viewerImg}
+                resizeMode="contain"
+              />
+            ) : null}
+
+            <IconButton
+              icon="close"
+              size={22}
+              onPress={() => setViewer({ visible: false })}
+              style={styles.viewerClose}
+              containerColor="rgba(0,0,0,0.55)"
+              iconColor="#fff"
+              accessibilityLabel="Cerrar visor"
+            />
+          </View>
+        </Modal>
+      </SafeAreaView>
     </Screen>
   );
 };
@@ -1215,7 +1236,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 8,
-    marginBottom: 6,
+    marginVertical: 6,
   },
   progress: { height: 6, borderRadius: 999 },
 

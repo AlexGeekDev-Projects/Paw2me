@@ -199,79 +199,72 @@ const LocationPicker: React.FC<Props> = ({
         style={[styles.card, { borderRadius: round }]}
         elevation={2}
       >
-        <View
-          style={[
-            styles.mapContainer,
-            {
-              height,
-              borderRadius: round,
-              backgroundColor: theme.colors.surfaceVariant,
-            },
-          ]}
-        >
-          <MapView
-            ref={mapRef}
-            style={StyleSheet.absoluteFill}
-            provider={provider}
-            initialRegion={region}
-            onRegionChangeComplete={setRegion}
-            {...(Platform.OS === 'ios' ? { onPress: handleMapPressIOS } : {})}
-            collapsable={false}
-            toolbarEnabled={false}
-            liteMode={false}
-            moveOnMarkerPress={false}
-            scrollEnabled
-            zoomEnabled
-            rotateEnabled={false}
-            pitchEnabled={false}
+        <View style={[styles.clip, { borderRadius: round }]}>
+          <View
+            style={[
+              styles.mapContainer,
+              { height, backgroundColor: theme.colors.surfaceVariant },
+            ]}
           >
-            {marker && (
-              <Marker
-                coordinate={{ latitude: marker.lat, longitude: marker.lng }}
-              >
-                {/* Pin rojo custom con animación */}
-                <Animated.View style={{ transform: [{ translateY: pinDrop }] }}>
-                  <View
-                    style={[
-                      styles.pinHead,
-                      { backgroundColor: '#E53935' /* rojo visible */ },
-                    ]}
+            <MapView
+              ref={mapRef}
+              style={StyleSheet.absoluteFill}
+              provider={provider}
+              initialRegion={region}
+              onRegionChangeComplete={setRegion}
+              {...(Platform.OS === 'ios' ? { onPress: handleMapPressIOS } : {})}
+              collapsable={false}
+              toolbarEnabled={false}
+              liteMode={false}
+              moveOnMarkerPress={false}
+              scrollEnabled
+              zoomEnabled
+              rotateEnabled={false}
+              pitchEnabled={false}
+            >
+              {marker && (
+                <Marker
+                  coordinate={{ latitude: marker.lat, longitude: marker.lng }}
+                >
+                  <Animated.View
+                    style={{ transform: [{ translateY: pinDrop }] }}
                   >
                     <View
-                      style={[styles.pinDot, { backgroundColor: '#FFFFFF' }]}
+                      style={[styles.pinHead, { backgroundColor: '#E53935' }]}
+                    >
+                      <View
+                        style={[styles.pinDot, { backgroundColor: '#FFFFFF' }]}
+                      />
+                    </View>
+                    <View
+                      style={[styles.pinTail, { backgroundColor: '#E53935' }]}
                     />
-                  </View>
-                  <View
-                    style={[styles.pinTail, { backgroundColor: '#E53935' }]}
-                  />
-                </Animated.View>
-              </Marker>
-            )}
-          </MapView>
+                  </Animated.View>
+                </Marker>
+              )}
+            </MapView>
 
-          {Platform.OS === 'android' ? (
-            <View
-              style={StyleSheet.absoluteFill}
-              onStartShouldSetResponder={() => true}
-              onResponderRelease={handleOverlayReleaseAndroid}
-            />
-          ) : null}
-
-          {/* Overlay superior: solo mini botón tonal (sin texto de dirección) */}
-          <View style={styles.mapOverlays}>
-            <View style={styles.overlayRow}>
-              <View />
-              <IconButton
-                mode="contained-tonal"
-                icon="crosshairs-gps"
-                size={22}
-                disabled={locating || !onUseMyLocation}
-                onPress={(_e: GestureResponderEvent) => {
-                  void onUseMyLocation?.();
-                }}
-                accessibilityLabel="Usar mi ubicación"
-                style={styles.fabMini}
+            {Platform.OS === 'android' ? (
+              <View
+                style={StyleSheet.absoluteFill}
+                onStartShouldSetResponder={() => true}
+                onResponderRelease={handleOverlayReleaseAndroid}
               />
+            ) : null}
+
+            <View style={styles.mapOverlays}>
+              <View style={styles.overlayRow}>
+                <View />
+                <IconButton
+                  mode="contained-tonal"
+                  icon="crosshairs-gps"
+                  size={22}
+                  disabled={locating || !onUseMyLocation}
+                  onPress={() => void onUseMyLocation?.()}
+                  accessibilityLabel="Usar mi ubicación"
+                  style={styles.fabMini}
+                />
+              </View>
             </View>
           </View>
         </View>
@@ -322,7 +315,10 @@ const styles = StyleSheet.create({
   caption: { opacity: 0.7 },
 
   card: {
-    overflow: 'hidden',
+    // overflow: 'hidden',
+  },
+  clip: {
+    overflow: 'hidden', // ✅ el clip vive aquí
   },
   mapContainer: {
     width: '100%',
