@@ -211,9 +211,7 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
 
   const currentMeta = useMemo(
     () =>
-      currentLocal
-        ? (REACTIONS.find(r => r.key === currentLocal) ?? null)
-        : null,
+      currentLocal ? REACTIONS.find(r => r.key === currentLocal) ?? null : null,
     [currentLocal],
   );
 
@@ -282,7 +280,9 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
     const parts: string[] = [];
     if (commentsCount > 0)
       parts.push(
-        `${commentsCount} ${commentsCount === 1 ? 'comentario' : 'comentarios'}`,
+        `${commentsCount} ${
+          commentsCount === 1 ? 'comentario' : 'comentarios'
+        }`,
       );
     if (sharesCount > 0)
       parts.push(
@@ -354,8 +354,8 @@ const ReactionFooter: React.FC<ReactionFooterProps> = ({
               }}
             >
               {currentLocal
-                ? (REACTIONS.find(r => r.key === currentLocal)?.label ??
-                  'Me gusta')
+                ? REACTIONS.find(r => r.key === currentLocal)?.label ??
+                  'Me gusta'
                 : 'Me gusta'}
             </Text>
           </View>
@@ -420,7 +420,12 @@ const styles = StyleSheet.create({
     minHeight: 18,
   },
   topStatsPress: { marginLeft: 'auto' }, // empuja a la derecha y hace el área clicable
-  topStatsText: { opacity: 0.7, textAlign: 'right' },
+  topStatsText: {
+    opacity: 0.9,
+    textAlign: 'right',
+    fontWeight: '700',
+    fontSize: 14,
+  },
   summaryWrap: { flexDirection: 'row', alignItems: 'center' },
 
   bubbles: { position: 'relative', height: 16 },

@@ -57,9 +57,9 @@ import Screen from '@components/layout/Screen';
 import { useUserLocation } from '@hooks/useUserLocation';
 import { reverseGeocode } from '@services/geoService';
 
-// Tipado de navegación: agregamos AnimalDetail localmente
+// Tipado de navegación
 type NavParamList = RootStackParamList & {
-  CreateAnimal: undefined; // o el tipo real si recibe params
+  CreateAnimal: undefined;
   AnimalDetail: { id: string };
 };
 type Props = NativeStackScreenProps<NavParamList, 'CreateAnimal'>;
@@ -128,6 +128,23 @@ type UploadParams =
       contentType: ImgContentType;
     });
 
+// Tipo discriminado para putAnimalImage
+type PutAnimalImageArg =
+  | {
+      animalId: string;
+      fileName: string;
+      contentType: ImgContentType;
+      kind: 'base64';
+      base64: string;
+    }
+  | {
+      animalId: string;
+      fileName: string;
+      contentType: ImgContentType;
+      kind: 'local';
+      localUri: string;
+    };
+
 const toUploadParams = (
   a: Asset,
   index: number,
@@ -142,7 +159,7 @@ const toUploadParams = (
   }
   if (hasUri(a)) {
     const scheme = uriScheme(a.uri);
-    // iOS 'ph://' NO es válido para putFile(); si no hay base64, lo saltamos
+    // iOS 'ph://' NO sirve para putFile(); si no hay base64, lo saltamos
     if (Platform.OS === 'ios' && scheme === 'ph') return null;
     if (scheme === 'file' || scheme === 'content') {
       return { kind: 'local', localUri: a.uri!, fileName, contentType: ct };
@@ -180,7 +197,7 @@ const tagOptions = [
   'especial',
 ] as const;
 
-// ✔️ Ajustado para exactOptionalPropertyTypes
+// ✔️ exactOptionalPropertyTypes
 type Draft = {
   name: string;
   species: Species;
@@ -208,6 +225,13 @@ type Draft = {
   coverUri?: string | undefined;
   galleryUris: string[];
 };
+
+const isSpecies = (v: unknown): v is Species =>
+  (speciesOptions as readonly string[]).includes(String(v));
+const isSize = (v: unknown): v is (typeof sizes)[number] =>
+  (sizes as readonly string[]).includes(String(v));
+const isSex = (v: unknown): v is (typeof sexes)[number] =>
+  (sexes as readonly string[]).includes(String(v));
 
 const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
   // core
@@ -387,7 +411,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
     } catch {}
   }, [locateMe]);
 
-  // Stepper (3 pasos: datos, ubicación, fotos)
+  // Stepper
   const step1Done =
     name.trim().length > 0 &&
     story.trim().length > 0 &&
@@ -399,7 +423,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
         Number(ageMonths) >= 0 &&
         Number(ageMonths) <= 600));
   const step2Done = Boolean(geo);
-  const step3Done = hasAnyPhoto; // ahora obligatorio
+  const step3Done = hasAnyPhoto;
   const stepProgress =
     (Number(step1Done) + Number(step2Done) + Number(step3Done)) / 3;
 
@@ -464,12 +488,13 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
       const raw = await AsyncStorage.getItem(DRAFT_KEY);
       if (!raw) return;
       const d: Draft = JSON.parse(raw);
+
       setName(d.name ?? '');
-      setSpecies(d.species ?? 'perro');
-      setSize((d.size as any) ?? 'M');
-      setSex((d.sex as any) ?? 'macho');
-      setTags(d.tags ?? []);
-      setAgeMonths(d.ageMonths ?? '6');
+      setSpecies(isSpecies(d.species) ? d.species : 'perro');
+      setSize(isSize(d.size) ? d.size : 'M');
+      setSex(isSex(d.sex) ? d.sex : 'macho');
+      setTags(Array.isArray(d.tags) ? d.tags : []);
+      setAgeMonths(typeof d.ageMonths === 'string' ? d.ageMonths : '6');
       setAgeUnknown(Boolean(d.ageUnknown));
       setMixedBreed(Boolean(d.mixedBreed));
       setSterilized(Boolean(d.sterilized));
@@ -591,17 +616,24 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
       // Cover
       if (coverParams) {
         try {
-          const coverArgs =
+          const coverArgs: PutAnimalImageArg =
             coverParams.kind === 'base64'
-              ? { kind: 'base64' as const, base64: coverParams.base64 }
-              : { kind: 'local' as const, localUri: coverParams.localUri };
+              ? {
+                  animalId,
+                  fileName: coverParams.fileName,
+                  contentType: coverParams.contentType,
+                  kind: 'base64',
+                  base64: coverParams.base64,
+                }
+              : {
+                  animalId,
+                  fileName: coverParams.fileName,
+                  contentType: coverParams.contentType,
+                  kind: 'local',
+                  localUri: coverParams.localUri,
+                };
 
-          const url = await putAnimalImage({
-            animalId,
-            fileName: coverParams.fileName,
-            contentType: coverParams.contentType,
-            ...coverArgs,
-          } as any);
+          const url = await putAnimalImage(coverArgs);
 
           mediaCount += 1;
           uploaded += 1;
@@ -609,7 +641,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
 
           await updateAnimalPartial(animalId, { coverUrl: url, mediaCount });
         } catch (e) {
-          const code = (e as any)?.code;
+          const code = (e as { code?: string } | undefined)?.code;
           const msg = e instanceof Error ? e.message : String(e);
           console.error('[publish][cover] upload error', code, msg);
           mediaWarnings.push(`Cover: ${code ?? 'desconocido'} – ${msg}`);
@@ -619,24 +651,31 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
       // Galería
       for (const [i, p] of galleryParams.entries()) {
         try {
-          const uploadArgs =
+          const uploadArgs: PutAnimalImageArg =
             p.kind === 'base64'
-              ? { kind: 'base64' as const, base64: p.base64 }
-              : { kind: 'local' as const, localUri: p.localUri };
+              ? {
+                  animalId,
+                  fileName: p.fileName,
+                  contentType: p.contentType,
+                  kind: 'base64',
+                  base64: p.base64,
+                }
+              : {
+                  animalId,
+                  fileName: p.fileName,
+                  contentType: p.contentType,
+                  kind: 'local',
+                  localUri: p.localUri,
+                };
 
-          const url = await putAnimalImage({
-            animalId,
-            fileName: p.fileName,
-            contentType: p.contentType,
-            ...uploadArgs,
-          } as any);
+          const url = await putAnimalImage(uploadArgs);
 
           galleryURLs.push(url);
           mediaCount += 1;
           uploaded += 1;
           tick();
         } catch (e) {
-          const code = (e as any)?.code;
+          const code = (e as { code?: string } | undefined)?.code;
           const msg = e instanceof Error ? e.message : String(e);
           console.error('[publish][gallery] upload error', code, msg);
           mediaWarnings.push(
@@ -663,8 +702,15 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
         await AsyncStorage.removeItem(DRAFT_KEY);
       } catch {}
 
-      // Redirección al detalle anidado en Feed
-      (navigation as any).navigate('AppTabs', {
+      // Redirección al detalle (manteniendo tu navegación)
+      (
+        navigation as unknown as {
+          navigate: (
+            r: string,
+            p?: { screen?: string; params?: unknown } & Record<string, unknown>,
+          ) => void;
+        }
+      ).navigate('AppTabs', {
         screen: 'FeedTab',
         params: {
           screen: 'AnimalDetail',
@@ -705,14 +751,19 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
   const disabled = submitting || errors.length > 0;
 
   return (
-    <Screen style={styles.container}>
+    <Screen style={styles.container} edges={['top']}>
       <StatusBar barStyle="light-content" />
-      <SafeAreaView style={styles.flex} edges={['top', 'bottom']}>
+      {/* ✅ Mantener encabezado como lo tenías y solo proteger safe-top */}
+      <View style={styles.flex}>
         <PageHeader
           title="Nueva huellita"
           subtitle="Completa el perfil para publicación"
           onBack={() =>
-            (navigation as any).navigate('AppTabs', {
+            (
+              navigation as unknown as {
+                navigate: (r: string, p?: unknown) => void;
+              }
+            ).navigate('AppTabs', {
               screen: 'ExploreTab',
               params: { screen: 'Explore' },
             })
@@ -726,7 +777,6 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
               compact
               selected={step1Done}
               icon={step1Done ? 'check' : 'numeric-1-circle-outline'}
-              onPress={() => {}}
             >
               Datos
             </Chip>
@@ -734,7 +784,6 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
               compact
               selected={step2Done}
               icon={step2Done ? 'check' : 'numeric-2-circle-outline'}
-              onPress={() => {}}
             >
               Ubicación
             </Chip>
@@ -742,7 +791,6 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
               compact
               selected={step3Done}
               icon={step3Done ? 'check' : 'numeric-3-circle-outline'}
-              onPress={() => {}}
             >
               Fotos
             </Chip>
@@ -797,10 +845,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
               <SegmentedButtons
                 value={size}
                 onValueChange={v => setSize(v as (typeof sizes)[number])}
-                buttons={sizes.map(s => ({
-                  value: s,
-                  label: s,
-                }))}
+                buttons={sizes.map(s => ({ value: s, label: s }))}
                 density="regular"
                 style={{ marginTop: 2 }}
               />
@@ -927,7 +972,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
               )}
             </Section>
 
-            {/* Ubicación ——— justo DESPUÉS de “¿Cómo es?” */}
+            {/* Ubicación */}
             <LocationPicker
               headTitle="Ubicación *"
               value={geo}
@@ -1043,7 +1088,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
                         style={styles.thumbWrap}
                       >
                         <Image source={{ uri: a.uri }} style={styles.thumb} />
-                        {/* Botón borrar directo */}
+                        {/* Borrar */}
                         <IconButton
                           icon="close"
                           size={16}
@@ -1053,7 +1098,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
                           iconColor="#fff"
                           accessibilityLabel="Eliminar imagen"
                         />
-                        {/* Botón menú contextual */}
+                        {/* Menú */}
                         <IconButton
                           icon="dots-vertical"
                           size={16}
@@ -1101,7 +1146,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
           </ScrollView>
         </KeyboardAvoidingView>
 
-        {/* FAB: Guardar borrador */}
+        {/* FAB: Guardar borrador (sin safe-bottom para no crear franja) */}
         <FAB
           icon="content-save-outline"
           label="Guardar borrador"
@@ -1121,12 +1166,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
         <Snackbar
           visible={snack.visible}
           onDismiss={() => setSnack({ visible: false, msg: '' })}
-          action={{
-            label: 'Borrar',
-            onPress: () => {
-              void clearDraft();
-            },
-          }}
+          action={{ label: 'Borrar', onPress: () => void clearDraft() }}
           duration={2500}
         >
           {snack.msg}
@@ -1162,9 +1202,8 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
                 onPress={() => {
                   if (actionIdx != null) {
                     const a = gallery[actionIdx];
-                    if (a && hasUri(a)) {
+                    if (a && hasUri(a))
                       setViewer({ visible: true, uri: a.uri });
-                    }
                   }
                   setActionVisible(false);
                 }}
@@ -1187,7 +1226,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
           </Dialog>
         </Portal>
 
-        {/* Visor de imagen (fullscreen, proporciones correctas) */}
+        {/* Visor de imagen (fullscreen) */}
         <Modal
           visible={viewer.visible}
           transparent
@@ -1195,12 +1234,10 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
           onRequestClose={() => setViewer({ visible: false })}
         >
           <View style={styles.viewerBackdrop}>
-            {/* Cerrar tocando fuera */}
             <Pressable
               style={StyleSheet.absoluteFill}
               onPress={() => setViewer({ visible: false })}
             />
-
             {viewer.uri ? (
               <Image
                 source={{ uri: viewer.uri }}
@@ -1208,7 +1245,6 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
                 resizeMode="contain"
               />
             ) : null}
-
             <IconButton
               icon="close"
               size={22}
@@ -1220,7 +1256,7 @@ const CreateAnimalScreen: React.FC<Props> = ({ navigation }) => {
             />
           </View>
         </Modal>
-      </SafeAreaView>
+      </View>
     </Screen>
   );
 };
@@ -1259,14 +1295,9 @@ const styles = StyleSheet.create({
   },
   hChips: { paddingRight: 8 },
 
-  // Card de dirección: sin overflow en Surface
-  addressCard: {
-    borderRadius: 12,
-  },
-  addressClip: {
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
+  // Card de dirección
+  addressCard: { borderRadius: 12 },
+  addressClip: { borderRadius: 12, overflow: 'hidden' },
 
   // Fotos
   mediaRow: {
@@ -1282,7 +1313,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // Envoltura requerida (borde punteado rojo)
+  // Envoltura requerida
   requiredWrap: {
     borderWidth: 1,
     borderStyle: 'dashed',
@@ -1290,7 +1321,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(211,47,47,0.06)',
   },
 
-  // ——— Portada
+  // Portada
   coverWrap: { position: 'relative' },
   cover: {
     width: 100,
@@ -1307,24 +1338,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     elevation: 1,
   },
-  delCover: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    zIndex: 2,
-  },
+  delCover: { position: 'absolute', top: 6, right: 6, zIndex: 2 },
 
-  // ——— Galería
-  galleryPreview: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 12,
-  },
-  thumbWrap: {
-    position: 'relative',
-    marginRight: 8,
-    marginBottom: 8,
-  },
+  // Galería
+  galleryPreview: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 12 },
+  thumbWrap: { position: 'relative', marginRight: 8, marginBottom: 8 },
   thumb: {
     width: 72,
     height: 72,
@@ -1332,18 +1350,10 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: '#bbb',
   },
-  delThumb: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    zIndex: 2,
-  },
-  menuThumb: {
-    position: 'absolute',
-    bottom: -8,
-    right: -8,
-    zIndex: 2,
-  },
+  delThumb: { position: 'absolute', top: -8, right: -8, zIndex: 2 },
+  menuThumb: { position: 'absolute', bottom: -8, right: -8, zIndex: 2 },
+
+  // Visor
   viewerBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.95)',
@@ -1351,11 +1361,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 12,
   },
-  viewerImg: {
-    width: '94%',
-    height: '80%',
-    borderRadius: 8,
-  },
+  viewerImg: { width: '94%', height: '80%', borderRadius: 8 },
   viewerClose: {
     position: 'absolute',
     top: Platform.select({ ios: 44, android: 16 }) as number,
@@ -1367,6 +1373,7 @@ const styles = StyleSheet.create({
   spacer: { height: 8 },
   cta: { marginTop: 12, borderRadius: 14 },
 
+  // FAB (sin safe-bottom para no crear franja)
   fab: { position: 'absolute', right: 16, bottom: 24 },
 
   viewerImage: {

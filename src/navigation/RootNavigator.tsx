@@ -1,10 +1,13 @@
 // src/navigation/RootNavigator.tsx
 import React from 'react';
 import { View } from 'react-native';
-import { NavigationContainer, StackActions } from '@react-navigation/native';
-import type { NavigatorScreenParams } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  type NavigatorScreenParams,
+} from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 import { useAuth } from '@hooks/useAuth';
@@ -20,12 +23,17 @@ import CreatePostScreen from '@screens/Feed/CreatePostScreen';
 import LoginScreen from '@screens/Auth/LoginScreen';
 import RegisterScreen from '@screens/Auth/RegisterScreen';
 import ForgotPasswordScreen from '@screens/Auth/ForgotPasswordScreen';
-
-// UI helpers
-import Loading from '@components/feedback/Loading';
-import Screen from '@components/layout/Screen';
-import { Appbar } from 'react-native-paper';
 import Matches from '@screens/User/Matches';
+
+// Services
+import ServicesHome, {
+  type ServicesCategoryId,
+} from '@screens/Services/ServicesHome';
+
+// UI
+import Loading from '@components/feedback/Loading';
+
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /* ========= Tipos ========= */
 export type RootStackParamList = {
@@ -49,7 +57,8 @@ export type ExploreStackParamList = {
 };
 
 export type ServicesStackParamList = {
-  Services: undefined;
+  ServicesHome: undefined;
+  ServicesCategory: { categoryId: ServicesCategoryId; title: string };
 };
 
 export type SettingsStackParamList = {
@@ -86,13 +95,20 @@ const FeedStackNavigator: React.FC = () => (
 );
 
 /* ======== Explore (tabs) ======== */
-/** Compatibilidad: CreateAnimalScreen tiene Props propios; lo adaptamos
- *  al tipo esperado por ExploreStack sin usar `any`.
- */
-const CreateAnimalCompat = CreateAnimalScreen as unknown as React.ComponentType;
-
-/** Componente estable para evitar función inline en `component` (sin warnings) */
 const MatchesScreen: React.FC = () => <Matches />;
+
+/** ✅ Adapter tipado para resolver el error “Type '{}' is missing navigation, route” */
+type ExploreCreateAnimalProps = NativeStackScreenProps<
+  ExploreStackParamList,
+  'CreateAnimal'
+>;
+type CreateAnimalProps = React.ComponentProps<typeof CreateAnimalScreen>;
+
+const CreateAnimalAdapter: React.FC<ExploreCreateAnimalProps> = props => {
+  // El shape de props coincide (navigation/route); casteamos vía unknown sin usar `any`.
+  const forwarded = props as unknown as CreateAnimalProps;
+  return <CreateAnimalScreen {...forwarded} />;
+};
 
 const ExploreStackNavigator: React.FC = () => (
   <ExploreStack.Navigator
@@ -102,23 +118,15 @@ const ExploreStackNavigator: React.FC = () => (
     <ExploreStack.Screen name="Explore" component={ExploreScreen} />
     <ExploreStack.Screen name="AnimalDetail" component={AnimalDetailScreen} />
     <ExploreStack.Screen name="Matches" component={MatchesScreen} />
-    <ExploreStack.Screen name="CreateAnimal" component={CreateAnimalCompat} />
+    <ExploreStack.Screen name="CreateAnimal" component={CreateAnimalAdapter} />
   </ExploreStack.Navigator>
 );
 
 /* ======== Services (tabs) ======== */
-const ServicesHome: React.FC = () => (
-  <Screen scrollable>
-    <Appbar.Header mode="center-aligned">
-      <Appbar.Content title="Servicios" />
-    </Appbar.Header>
-    {/* TODO: grid/cards de servicios */}
-  </Screen>
-);
-
 const ServicesStackNavigator: React.FC = () => (
   <ServicesStack.Navigator screenOptions={{ headerShown: false }}>
-    <ServicesStack.Screen name="Services" component={ServicesHome} />
+    <ServicesStack.Screen name="ServicesHome" component={ServicesHome} />
+    {/* <ServicesStack.Screen name="ServicesCategory" component={ServicesCategoryScreen} /> */}
   </ServicesStack.Navigator>
 );
 
@@ -132,23 +140,41 @@ const SettingsStackNavigator: React.FC = () => (
 /* ======== Tabs principales ======== */
 type TabIconProps = { size: number; color: string; focused: boolean };
 
+const NoopScreen: React.FC = () => <View />;
+
 const TabsView: React.FC = () => {
   const { theme } = useResolvedTheme();
-  const tabBg = (theme.colors as any).elevation?.level2 ?? theme.colors.surface;
+  const insets = useSafeAreaInsets();
+
+  // ✅ Sin index signature: tipamos 'elevation' opcional del tema MD3
+  type MaybeMD3Elevation = { elevation?: { level2?: string } };
+  const colors = theme.colors as unknown as MaybeMD3Elevation & {
+    surface: string;
+    onSurfaceDisabled: string;
+    primary: string;
+    onPrimary: string;
+  };
+  const tabBg = colors.elevation?.level2 ?? colors.surface;
   const borderTop = theme.dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+
+  const tabBarHeight = 56 + insets.bottom;
+  const tabBarPaddingBottom = Math.max(8, insets.bottom);
 
   return (
     <Tabs.Navigator
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
-        tabBarActiveTintColor: theme.colors.primary,
-        tabBarInactiveTintColor: theme.colors.onSurfaceDisabled,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.onSurfaceDisabled,
+        tabBarHideOnKeyboard: true,
         tabBarStyle: {
           backgroundColor: tabBg,
           borderTopColor: borderTop,
           borderTopWidth: 1,
-          height: 64,
+          height: tabBarHeight,
+          paddingBottom: tabBarPaddingBottom,
+          paddingTop: 6,
         },
       }}
     >
@@ -160,6 +186,13 @@ const TabsView: React.FC = () => {
             <Icon name="home-variant-outline" size={size} color={color} />
           ),
         }}
+        listeners={({ navigation }) => ({
+          tabPress: () => {
+            // Si estás en otra pantalla del stack, vuelve a Feed
+            navigation.navigate('FeedTab', { screen: 'Feed' });
+            // Nota: no hacemos preventDefault, así el screen puede scrollear al top
+          },
+        })}
       />
 
       <Tabs.Screen
@@ -170,18 +203,8 @@ const TabsView: React.FC = () => {
             <Icon name="paw-outline" size={size} color={color} />
           ),
         }}
-        listeners={({ navigation, route }) => ({
-          tabPress: e => {
-            // Si el tab ya está enfocado y hay pantallas encima del root, haz popToTop en el stack anidado.
-            const state: any = (route as any).state;
-            if (state?.type === 'stack' && state.index > 0) {
-              navigation.dispatch({
-                ...StackActions.popToTop(),
-                target: state.key, // MUY importante: enviar al stack anidado
-              });
-              return;
-            }
-            // Si vienes de otro tab o todavía no hay state del hijo, fuerza ir al root de Explore
+        listeners={({ navigation }) => ({
+          tabPress: () => {
             navigation.navigate('ExploreTab', { screen: 'Explore' });
           },
         })}
@@ -190,7 +213,7 @@ const TabsView: React.FC = () => {
       {/* “+” centrado — abre CreateAnimal dentro de Explore (tabs visibles) */}
       <Tabs.Screen
         name="Create"
-        component={ServicesHome /* placeholder requerido por Tabs */}
+        component={NoopScreen}
         options={{
           tabBarIcon: ({ size }: { size: number }) => (
             <View
@@ -200,8 +223,8 @@ const TabsView: React.FC = () => {
                 borderRadius: 18,
                 justifyContent: 'center',
                 alignItems: 'center',
-                backgroundColor: theme.colors.primary,
-                shadowColor: theme.colors.primary,
+                backgroundColor: colors.primary,
+                shadowColor: colors.primary,
                 shadowOpacity: 0.3,
                 shadowRadius: 6,
                 shadowOffset: { width: 0, height: 2 },
@@ -211,7 +234,7 @@ const TabsView: React.FC = () => {
               <Icon
                 name="plus"
                 size={Math.round(size * 0.85)}
-                color={theme.colors.onPrimary}
+                color={colors.onPrimary}
               />
             </View>
           ),

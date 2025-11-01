@@ -1,3 +1,4 @@
+// src/screens/Settings/SettingsScreen.tsx
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import {
@@ -9,19 +10,20 @@ import {
   useTheme,
 } from 'react-native-paper';
 import PageHeader from '@components/layout/PageHeader';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+// ❌ quitar: import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@hooks/useAuth';
 import { useResolvedTheme } from '@hooks/useResolvedTheme';
 import Screen from '@components/layout/Screen';
 
 const SettingsScreen: React.FC = () => {
-  const { top } = useSafeAreaInsets();
+  // ❌ quitar: const { top } = useSafeAreaInsets();
   const { isDark, toggleTheme } = useResolvedTheme();
   const { signOut, user } = useAuth();
   const theme = useTheme();
 
   return (
-    <Screen>
+    // ✅ sin safe area (la tab bar absorbe el inset inferior; PageHeader maneja el notch)
+    <Screen edges={[]}>
       <PageHeader title="Configuración" subtitle="Preferencias y cuenta" />
       <View style={styles.content}>
         <List.Section>
@@ -63,7 +65,6 @@ const SettingsScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
   content: { paddingHorizontal: 16, paddingVertical: 12 },
   logoutButton: {
     marginTop: 8,

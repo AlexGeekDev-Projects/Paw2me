@@ -740,6 +740,16 @@ const PostCard: React.FC<Props> = ({
     [contentRaw, needsClamp],
   );
 
+  const dateLabel = useMemo(
+    () =>
+      new Date(data.createdAt).toLocaleDateString('es-ES', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      }),
+    [data.createdAt],
+  );
+
   type Pos = Readonly<{
     idx: number;
     x: number;
@@ -1165,11 +1175,7 @@ const PostCard: React.FC<Props> = ({
                   variant="labelSmall"
                   style={{ opacity: 0.85, color: '#fff' }}
                 >
-                  {new Date(data.createdAt).toLocaleDateString('es-ES', {
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric',
-                  })}
+                  {dateLabel}
                 </Text>
               </View>
             </View>
